@@ -5,452 +5,1360 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>babysit</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        :root {
+            --primary: #6366f1;
+            --bg: #f8fafc;
+            --card: #ffffff;
+            --text: #1e293b;
+            --text-light: #64748b;
+            --border: #e2e8f0;
+            --feeding: #f59e0b;
+            --sleep: #8b5cf6;
+            --diaper: #06b6d4;
+            --food: #22c55e;
         }
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: #f5f5f5;
-            padding-bottom: 60px;
+            background: var(--bg);
+            color: var(--text);
+            padding-bottom: 80px;
         }
         
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, var(--primary) 0%, #8b5cf6 100%);
             color: white;
             padding: 20px;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
         }
         
-        .header h1 {
-            font-size: 20px;
-            font-weight: 600;
+        .baby-name { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+        .baby-age { font-size: 14px; opacity: 0.9; }
+        
+        .month-selector {
+            background: var(--card);
+            margin: -16px 16px 16px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
         }
         
-        .header .subtitle {
-            font-size: 12px;
-            opacity: 0.9;
-            margin-top: 4px;
-        }
-        
-        .refresh-btn {
-            position: absolute;
-            right: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(255,255,255,0.2);
+        .month-btn {
+            width: 36px; height: 36px;
+            border-radius: 10px;
             border: none;
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
+            background: var(--bg);
+            font-size: 18px;
             cursor: pointer;
         }
         
-        .date-section {
-            margin: 16px;
-            background: white;
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        .month-display { font-size: 18px; font-weight: 600; }
+        
+        .quick-actions {
+            display: flex;
+            gap: 8px;
+            padding: 0 16px;
+            margin-bottom: 16px;
+            overflow-x: auto;
         }
         
-        .date-header {
-            background: #fafafa;
-            padding: 12px 16px;
+        .action-btn {
+            flex: 1; min-width: 70px;
+            background: var(--card);
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 8px;
+            text-align: center;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        
+        .action-btn:active { transform: scale(0.98); }
+        .action-icon { font-size: 24px; margin-bottom: 4px; }
+        
+        .heatmap-container {
+            background: var(--card);
+            margin: 0 16px 16px;
+            padding: 16px;
+            border-radius: 16px;
+        }
+        
+        .heatmap-title {
+            font-size: 14px;
             font-weight: 600;
-            color: #333;
+            margin-bottom: 12px;
+            color: var(--text-light);
+        }
+        
+        .heatmap-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        
+        .heatmap {
             display: flex;
-            justify-content: space-between;
+            flex-direction: column;
+            gap: 4px;
+            width: fit-content;
+        }
+        
+        .heatmap-row {
+            display: flex;
+            gap: 4px;
             align-items: center;
         }
         
-        .date-count {
+        .heatmap-cell {
+            width: 32px; height: 32px;
+            border-radius: 6px;
+            background: #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            cursor: pointer;
+            flex-shrink: 0;
+            position: relative;
+        }
+        
+        .heatmap-cell.has-data { background: #e0e7ff; }
+        .heatmap-cell.hour-label { background: transparent; font-size: 11px; color: var(--text-light); width: 32px; }
+        .heatmap-cell.day-label { background: transparent; font-size: 10px; color: var(--text-light); height: 24px; width: 32px; }
+        .heatmap-cell.corner { background: transparent; }
+        
+        /* 多个动作的堆叠显示 */
+        .badges-stack {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1px;
+            justify-content: center;
+            align-items: center;
+            max-width: 30px;
+        }
+        
+        .badge {
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            font-size: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .badge-feeding { background: var(--feeding); color: white; }
+        .badge-sleep { background: var(--sleep); color: white; }
+        .badge-diaper { background: var(--diaper); color: white; }
+        .badge-food { background: var(--food); color: white; }
+        
+        .legend {
+            display: flex;
+            gap: 16px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
             font-size: 12px;
-            color: #999;
-            font-weight: normal;
+        }
+        
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 50%; }
+        
+        .photos-section, .growth-section, .vaccine-section, .content-section, .summary-section {
+            background: var(--card);
+            margin: 0 16px 16px;
+            padding: 16px;
+            border-radius: 16px;
+        }
+        
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-light);
+        }
+        
+        .view-all-btn {
+            font-size: 13px;
+            color: var(--primary);
+            background: none;
+            border: none;
+            cursor: pointer;
         }
         
         .photo-grid {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 2px;
-            padding: 2px;
+            grid-template-columns: repeat(6, 1fr);
+            gap: 4px;
         }
         
         .photo-item {
             aspect-ratio: 1;
-            background: #eee;
-            position: relative;
-            cursor: pointer;
+            background: var(--bg);
+            border-radius: 4px;
             overflow: hidden;
+            cursor: pointer;
+            position: relative;
         }
         
-        .photo-item img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            transition: transform 0.2s;
-            display: block;
-        }
-        
-        .photo-item:active img {
-            transform: scale(0.95);
-        }
+        .photo-item img { width: 100%; height: 100%; object-fit: cover; }
         
         .photo-item.video::after {
             content: "▶";
             position: absolute;
-            top: 50%;
-            left: 50%;
+            top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             color: white;
-            font-size: 24px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-            pointer-events: none;
+            font-size: 10px;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.5);
         }
         
-        .loading {
+        /* 昨日总结样式 */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        
+        .summary-card {
+            background: var(--bg);
+            padding: 16px 8px;
+            border-radius: 12px;
             text-align: center;
-            padding: 40px;
-            color: #999;
         }
         
-        .spinner {
-            border: 2px solid #f3f3f3;
-            border-top: 2px solid #667eea;
-            border-radius: 50%;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            margin-right: 8px;
+        .summary-value { font-size: 24px; font-weight: 700; color: var(--primary); }
+        .summary-label { font-size: 12px; color: var(--text-light); margin-top: 4px; }
+        
+        /* 生长曲线快速入口 */
+        .growth-quick {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .growth-item {
+            background: var(--bg);
+            padding: 12px 16px;
+            border-radius: 12px;
+            min-width: 100px;
+            text-align: center;
         }
         
-        /* 全屏查看 */
+        .growth-value { font-size: 18px; font-weight: 600; }
+        .growth-label { font-size: 11px; color: var(--text-light); }
+        
+        .add-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        /* 疫苗提醒 */
+        .vaccine-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .vaccine-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: 10px;
+        }
+        
+        .vaccine-info { flex: 1; }
+        .vaccine-name { font-weight: 500; font-size: 14px; }
+        .vaccine-time { font-size: 12px; color: var(--text-light); }
+        .vaccine-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .status-pending { background: #fef3c7; color: #92400e; }
+        .status-done { background: #d1fae5; color: #065f46; }
+        .status-overdue { background: #fee2e2; color: #991b1b; }
+        
+
         .modal {
             display: none;
             position: fixed;
-            top: 0;
-            left: 0;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 100;
+            align-items: flex-end;
+        }
+        
+        .modal.active { display: flex; }
+        
+        .modal-content {
+            background: var(--card);
             width: 100%;
-            height: 100%;
+            border-radius: 24px 24px 0 0;
+            padding: 24px;
+            animation: slideUp 0.3s ease;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); }
+            to { transform: translateY(0); }
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .modal-title { font-size: 18px; font-weight: 600; }
+        .modal-close { font-size: 24px; color: var(--text-light); cursor: pointer; }
+        
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 14px; color: var(--text-light); margin-bottom: 6px; }
+        .form-input, .form-select { width: 100%; padding: 14px; border: 2px solid var(--border); border-radius: 12px; font-size: 16px; }
+        
+        .btn-full {
+            width: 100%; padding: 16px;
+            background: var(--primary); color: white;
+            border: none; border-radius: 12px;
+            font-size: 16px; font-weight: 600;
+            cursor: pointer;
+        }
+        
+        /* 图片查看器 */
+        .image-viewer {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
             background: rgba(0,0,0,0.95);
-            z-index: 1000;
-            justify-content: center;
+            z-index: 200;
             align-items: center;
+            justify-content: center;
+            flex-direction: column;
         }
         
-        .modal.active {
-            display: flex;
-        }
+        .image-viewer.active { display: flex; }
         
-        .modal img, .modal video {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-        }
-        
-        .modal-close {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            color: white;
-            font-size: 32px;
+        .viewer-close { 
+            position: absolute; 
+            top: 20px; right: 20px; 
+            color: white; 
+            font-size: 32px; 
             cursor: pointer;
-            width: 44px;
-            height: 44px;
+            z-index: 10;
+        }
+        
+        .viewer-content { 
+            flex: 1;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: rgba(255,255,255,0.1);
-            border-radius: 50%;
+            width: 100%;
         }
         
-        .modal-nav {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            color: white;
-            font-size: 40px;
-            cursor: pointer;
+        .viewer-content img, .viewer-content video { 
+            max-width: 95vw; 
+            max-height: 80vh; 
+        }
+        
+        .viewer-actions {
+            display: flex;
+            gap: 20px;
             padding: 20px;
-            background: rgba(255,255,255,0.1);
-            border-radius: 50%;
-            width: 60px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
         }
         
-        .modal-prev { left: 10px; }
-        .modal-next { right: 10px; }
+        .viewer-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            font-size: 20px;
+            cursor: pointer;
+        }
         
-        .modal-info {
+        .viewer-loading {
             position: absolute;
-            bottom: 20px;
-            left: 0;
-            right: 0;
-            text-align: center;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
             color: white;
             font-size: 14px;
-            padding: 10px;
-            background: rgba(0,0,0,0.5);
         }
         
-        .modal-loading {
-            color: white;
-            font-size: 16px;
+        .spinner {
+            width: 40px; height: 40px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        
+        @keyframes spin { to { transform: rotate(360deg); } }
+        
+        .all-photos-modal .modal-content { max-height: 90vh; }
+        .all-photos-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .all-photos-grid .photo-item { aspect-ratio: 1; }
+        
+        /* 记录详情弹窗 */
+        .record-detail-item {
             display: flex;
-            flex-direction: column;
             align-items: center;
-            gap: 16px;
+            justify-content: space-between;
+            padding: 12px;
+            background: var(--bg);
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }
+        .record-detail-info { flex: 1; }
+        .record-detail-type { font-weight: 500; }
+        .record-detail-meta { font-size: 12px; color: var(--text-light); }
+        .record-delete-btn {
+            background: #fee2e2;
+            color: #991b1b;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
         }
         
-        .modal-loading .spinner {
-            width: 40px;
-            height: 40px;
-            border-width: 3px;
+        /* 照片时间标签 */
+        .photo-item {
+            position: relative;
         }
+        .photo-time {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0,0,0,0.6);
+            color: white;
+            font-size: 9px;
+            padding: 2px 4px;
+            text-align: center;
+        }
+        
+        /* 分页 */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+        }
+        .page-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--border);
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .page-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        .page-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* 生长曲线图 */
+        .chart-container {
+            height: 200px;
+            background: var(--bg);
+            border-radius: 12px;
+            margin-top: 12px;
+            position: relative;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-light);
+        }
+        
+        .empty-icon { font-size: 32px; margin-bottom: 8px; }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>babysit</h1>
-        <div class="subtitle" id="subtitle">加载中...</div>
-        <button class="refresh-btn" onclick="refreshFiles()">刷新</button>
+        <div class="baby-name" id="babyName">👶 宝宝</div>
+        <div class="baby-age" id="babyAge">请先设置宝宝信息</div>
     </div>
     
-    <div id="content">
-        <div class="loading">
-            <div class="spinner"></div>
-            正在加载照片...
+    <div class="month-selector">
+        <button class="month-btn" onclick="changeMonth(-1)">‹</button>
+        <div class="month-display" id="monthDisplay">2026年3月</div>
+        <button class="month-btn" onclick="changeMonth(1)">›</button>
+    </div>
+    
+    <div class="quick-actions">
+        <div class="action-btn" onclick="openRecordModal('feeding')">
+            <div class="action-icon">🍼</div>
+            <div>喂奶</div>
+        </div>
+        <div class="action-btn" onclick="openRecordModal('sleep')">
+            <div class="action-icon">😴</div>
+            <div>睡眠</div>
+        </div>
+        <div class="action-btn" onclick="openRecordModal('diaper')">
+            <div class="action-icon">🩲</div>
+            <div>尿布</div>
+        </div>
+        <div class="action-btn" onclick="openRecordModal('food')">
+            <div class="action-icon">🥄</div>
+            <div>辅食</div>
+        </div>
+        <div class="action-btn" onclick="openGrowthModal()">
+            <div class="action-icon">📏</div>
+            <div>生长</div>
+        </div>
+        <div class="action-btn" onclick="openBabyModal()">
+            <div class="action-icon">⚙️</div>
+            <div>设置</div>
         </div>
     </div>
     
-    <!-- 全屏查看模态框 -->
-    <div class="modal" id="modal" onclick="closeModal(event)">
-        <div class="modal-close" onclick="closeModal()">×</div>
-        <div class="modal-nav modal-prev" onclick="navigate(-1, event)">‹</div>
-        <div class="modal-nav modal-next" onclick="navigate(1, event)">›</div>
-        <div id="modal-content">
-            <div class="modal-loading">
-                <div class="spinner"></div>
-                正在加载...
+    <!-- 昨日总结 -->
+    <div class="summary-section">
+        <div class="section-header">
+            <div class="section-title">昨日总结</div>
+        </div>
+        <div class="summary-grid" id="summaryGrid">
+            <div class="summary-card">
+                <div class="summary-value" id="yesterdaySleep">-</div>
+                <div class="summary-label">睡眠时长</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="yesterdayFeeding">-</div>
+                <div class="summary-label">喂奶次数</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="yesterdayDiaper">-</div>
+                <div class="summary-label">换尿布</div>
             </div>
         </div>
-        <div class="modal-info" id="modal-info"></div>
+    </div>
+    
+    <div class="heatmap-container">
+        <div class="heatmap-title">本月喂养记录 (日期→)</div>
+        <div class="heatmap-scroll">
+            <div id="heatmap"></div>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><div class="legend-dot" style="background: var(--feeding)"></div><span>喂奶</span></div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--sleep)"></div><span>睡眠</span></div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--diaper)"></div><span>尿布</span></div>
+            <div class="legend-item"><div class="legend-dot" style="background: var(--food)"></div><span>辅食</span></div>
+        </div>
+    </div>
+    
+    <!-- 生长曲线 -->
+    <div class="growth-section">
+        <div class="section-header">
+            <div class="section-title">生长记录</div>
+            <button class="add-btn" onclick="openGrowthModal()">+ 记录</button>
+        </div>
+        <div class="growth-quick" id="growthList">
+            <div class="empty-state" style="padding:20px;width:100%">
+                <div class="empty-icon">📏</div>
+                <div style="font-size:12px">暂无记录</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 疫苗提醒 -->
+    <div class="vaccine-section">
+        <div class="section-header">
+            <div class="section-title">疫苗/体检提醒</div>
+        </div>
+        <div class="vaccine-list" id="vaccineList">
+            <div class="empty-state" style="padding:20px">
+                <div class="empty-icon">💉</div>
+                <div style="font-size:12px">请先设置宝宝信息</div>
+            </div>
+        </div>
+    </div>
+    
+
+    
+    <div class="photos-section">
+        <div class="section-header">
+            <div class="section-title" id="photosTitle">本月照片</div>
+            <button class="view-all-btn" onclick="openAllPhotos()" id="viewAllBtn" style="display:none">查看全部</button>
+        </div>
+        <div id="photosList">
+            <div style="text-align:center;padding:40px;color:var(--text-light)">
+                <div style="font-size:32px;margin-bottom:8px">📷</div>
+                <div>本月还没有照片</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 记录弹窗 -->
+    <div class="modal" id="recordModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">添加记录</div>
+                <div class="modal-close" onclick="closeModal()">&times;</div>
+            </div>
+            <form id="recordForm" onsubmit="saveRecord(event)">
+                <input type="hidden" id="recordType" name="type">
+                
+                <div class="form-group">
+                    <label class="form-label">日期</label>
+                    <input type="date" class="form-input" name="date" id="recordDate" required>
+                </div>
+                
+                <!-- 睡眠显示开始和结束小时 -->
+                <div id="sleepTimeGroup" style="display:none">
+                    <div class="form-group">
+                        <label class="form-label">开始时间</label>
+                        <select class="form-select" name="start_hour" id="sleepStartHour">
+                            <option value="0">0:00</option><option value="1">1:00</option><option value="2">2:00</option><option value="3">3:00</option>
+                            <option value="4">4:00</option><option value="5">5:00</option><option value="6">6:00</option><option value="7">7:00</option>
+                            <option value="8">8:00</option><option value="9">9:00</option><option value="10">10:00</option><option value="11">11:00</option>
+                            <option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option><option value="15">15:00</option>
+                            <option value="16">16:00</option><option value="17">17:00</option><option value="18">18:00</option><option value="19">19:00</option>
+                            <option value="20">20:00</option><option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">结束时间</label>
+                        <select class="form-select" name="end_hour" id="sleepEndHour">
+                            <option value="">--</option>
+                            <option value="0">0:00</option><option value="1">1:00</option><option value="2">2:00</option><option value="3">3:00</option>
+                            <option value="4">4:00</option><option value="5">5:00</option><option value="6">6:00</option><option value="7">7:00</option>
+                            <option value="8">8:00</option><option value="9">9:00</option><option value="10">10:00</option><option value="11">11:00</option>
+                            <option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option><option value="15">15:00</option>
+                            <option value="16">16:00</option><option value="17">17:00</option><option value="18">18:00</option><option value="19">19:00</option>
+                            <option value="20">20:00</option><option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- 其他类型只显示小时 -->
+                <div class="form-group" id="singleTimeGroup">
+                    <label class="form-label">时间</label>
+                    <select class="form-select" name="hour" id="recordHour">
+                        <option value="0">0:00</option><option value="1">1:00</option><option value="2">2:00</option><option value="3">3:00</option>
+                        <option value="4">4:00</option><option value="5">5:00</option><option value="6">6:00</option><option value="7">7:00</option>
+                        <option value="8">8:00</option><option value="9">9:00</option><option value="10">10:00</option><option value="11">11:00</option>
+                        <option value="12">12:00</option><option value="13">13:00</option><option value="14">14:00</option><option value="15">15:00</option>
+                        <option value="16">16:00</option><option value="17">17:00</option><option value="18">18:00</option><option value="19">19:00</option>
+                        <option value="20">20:00</option><option value="21">21:00</option><option value="22">22:00</option><option value="23">23:00</option>
+                    </select>
+                </div>
+                
+                <!-- 只有喂奶显示毫升 -->
+                <div class="form-group" id="amountGroup">
+                    <label class="form-label">奶量 (ml)</label>
+                    <input type="number" class="form-input" name="amount" placeholder="120">
+                </div>
+                
+                <button type="submit" class="btn-full">保存</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- 宝宝设置弹窗 -->
+    <div class="modal" id="babyModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">设置宝宝信息</div>
+                <div class="modal-close" onclick="closeBabyModal()">&times;</div>
+            </div>
+            <form id="babyForm" onsubmit="saveBaby(event)">
+                <div class="form-group">
+                    <label class="form-label">姓名</label>
+                    <input type="text" class="form-input" name="name" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">出生日期</label>
+                    <input type="date" class="form-input" name="birthday" required>
+                </div>
+                <button type="submit" class="btn-full">保存</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- 生长记录弹窗 -->
+    <div class="modal" id="growthModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">记录生长数据</div>
+                <div class="modal-close" onclick="closeGrowthModal()">&times;</div>
+            </div>
+            <form id="growthForm" onsubmit="saveGrowth(event)">
+                <div class="form-group">
+                    <label class="form-label">日期</label>
+                    <input type="date" class="form-input" name="date" id="growthDate" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">身高 (cm)</label>
+                    <input type="number" step="0.1" class="form-input" name="height" placeholder="60.5">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">体重 (kg)</label>
+                    <input type="number" step="0.01" class="form-input" name="weight" placeholder="6.5">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">头围 (cm)</label>
+                    <input type="number" step="0.1" class="form-input" name="head" placeholder="40.0">
+                </div>
+                <button type="submit" class="btn-full">保存</button>
+            </form>
+        </div>
+    </div>
+    
+    <!-- 记录详情弹窗 -->
+    <div class="modal" id="recordDetailModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="recordDetailTitle">记录详情</div>
+                <div class="modal-close" onclick="closeRecordDetail()">&times;</div>
+            </div>
+            <div id="recordDetailList"></div>
+        </div>
+    </div>
+    
+    <!-- 查看全部照片弹窗 -->
+    <div class="modal all-photos-modal" id="allPhotosModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="allPhotosTitle">全部照片</div>
+                <div class="modal-close" onclick="closeAllPhotos()">&times;</div>
+            </div>
+            <div class="all-photos-grid" id="allPhotosGrid"></div>
+            <div class="pagination" id="photosPagination"></div>
+        </div>
+    </div>
+    
+    <!-- 图片查看器 -->
+    <div class="image-viewer" id="imageViewer">
+        <div class="viewer-close" onclick="closeViewer()">&times;</div>
+        <div class="viewer-content" id="viewerContent">
+            <div class="viewer-loading">
+                <div class="spinner"></div>
+                <div>加载中...</div>
+            </div>
+        </div>
+        <div class="viewer-actions">
+            <button class="viewer-btn" onclick="downloadCurrent()" title="下载">⬇️</button>
+            <button class="viewer-btn" onclick="closeViewer()" title="关闭">✕</button>
+        </div>
     </div>
 
     <script>
-        let allFiles = [];
-        let currentIndex = 0;
-        let fileUrlCache = {};  // 缓存文件 URL
+        let currentYear = new Date().getFullYear();
+        let currentMonth = new Date().getMonth() + 1;
+        let heatmapData = {};
+        let monthPhotos = [];
+        let currentViewerPhoto = null;
+        let babyInfo = null;
         
-        // 加载文件列表
-        async function loadFiles() {
-            try {
-                const response = await fetch('/api/files');
-                const data = await response.json();
-                renderFiles(data);
-            } catch (error) {
-                document.getElementById('content').innerHTML = 
-                    `<div class="loading">加载失败: ${error.message}</div>`;
+        init();
+        
+        async function init() {
+            await loadBaby();
+            await loadMonth();
+            await loadYesterdaySummary();
+            await loadGrowth();
+        }
+        
+        async function loadBaby() {
+            const res = await fetch('/api/baby');
+            babyInfo = await res.json();
+            
+            if (babyInfo && babyInfo.name) {
+                document.getElementById('babyName').textContent = babyInfo.name;
+                const age = calculateAge(babyInfo.birthday);
+                document.getElementById('babyAge').textContent = `${age}个月 · ${babyInfo.birthday}`;
+                loadVaccines(age);
+            } else {
+                setTimeout(() => openBabyModal(), 500);
             }
         }
         
-        // 渲染文件
-        function renderFiles(dateGroups) {
-            const content = document.getElementById('content');
-            const subtitle = document.getElementById('subtitle');
+        function calculateAge(birthday) {
+            const birth = new Date(birthday);
+            const today = new Date();
+            let months = (today.getFullYear() - birth.getFullYear()) * 12 + (today.getMonth() - birth.getMonth());
+            if (today.getDate() < birth.getDate()) months--;
+            return Math.max(0, months);
+        }
+        
+        async function loadYesterdaySummary() {
+            const res = await fetch('/api/summary/yesterday');
+            const data = await res.json();
             
-            allFiles = [];
-            let totalCount = 0;
+            document.getElementById('yesterdaySleep').textContent = data.sleep || '-';
+            document.getElementById('yesterdayFeeding').textContent = data.feeding_count || '-';
+            document.getElementById('yesterdayDiaper').textContent = data.diaper_count || '-';
+        }
+        
+        async function loadGrowth() {
+            const res = await fetch('/api/growth');
+            const records = await res.json();
             
-            let html = '';
-            
-            for (const [date, files] of Object.entries(dateGroups)) {
-                totalCount += files.length;
-                
-                files.forEach((file) => {
-                    file.globalIndex = allFiles.length;
-                    file.date = date;
-                    allFiles.push(file);
-                });
-                
-                html += `
-                    <div class="date-section">
-                        <div class="date-header">
-                            <span>${date}</span>
-                            <span class="date-count">${files.length} 张</span>
-                        </div>
-                        <div class="photo-grid">
+            const container = document.getElementById('growthList');
+            if (records.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state" style="padding:20px;width:100%">
+                        <div class="empty-icon">📏</div>
+                        <div style="font-size:12px">暂无记录</div>
+                    </div>
                 `;
-                
-                files.forEach((file) => {
-                    const isVideo = file.type === 'video';
-                    const videoClass = isVideo ? 'video' : '';
-                    // 使用缩略图接口
-                    const thumbUrl = `/thumb/${encodeURIComponent(file.name)}`;
-                    
-                    html += `
-                        <div class="photo-item ${videoClass}" 
-                             onclick="openModal(${file.globalIndex})"
-                             data-name="${file.name}">
-                            <img src="${thumbUrl}" loading="lazy" alt="" onerror="this.style.opacity=0.3">
-                        </div>
-                    `;
-                });
-                
-                html += '</div></div>';
+                return;
             }
             
-            content.innerHTML = html;
-            subtitle.textContent = `共 ${totalCount} 张照片和视频`;
+            const latest = records[0];
+            container.innerHTML = `
+                <div class="growth-item">
+                    <div class="growth-value">${latest.height || '-'}</div>
+                    <div class="growth-label">身高 cm</div>
+                </div>
+                <div class="growth-item">
+                    <div class="growth-value">${latest.weight || '-'}</div>
+                    <div class="growth-label">体重 kg</div>
+                </div>
+                <div class="growth-item">
+                    <div class="growth-value">${latest.head || '-'}</div>
+                    <div class="growth-label">头围 cm</div>
+                </div>
+                <div class="growth-item" style="min-width:auto;padding:12px 20px">
+                    <div class="growth-value" style="font-size:12px">📈</div>
+                    <div class="growth-label">曲线</div>
+                </div>
+            `;
         }
         
-        // 获取文件下载 URL
-        async function getFileUrl(filename) {
-            // 检查缓存
-            if (fileUrlCache[filename]) {
-                return fileUrlCache[filename];
+        function loadVaccines(ageMonths) {
+            // 数据来源：国家免疫规划疫苗儿童免疫程序（2021年版）
+            // 详情：http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html
+            const vaccines = [
+                {name: '乙肝疫苗(第3针)', month: 6, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: 'A群流脑多糖疫苗(第1针)', month: 6, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: '6月龄体检', month: 6, type: 'checkup', source: '国家基本公共卫生', url: 'https://www.nhc.gov.cn/'},
+                {name: '麻腮风疫苗(第1针)', month: 8, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: '乙脑减毒活疫苗(第1针)', month: 8, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: '乙肝疫苗(加强)', month: 12, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: '水痘疫苗(第1针)', month: 12, type: 'vaccine', source: '非免疫规划(建议)', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: '1岁体检', month: 12, type: 'checkup', source: '国家基本公共卫生', url: 'https://www.nhc.gov.cn/'},
+                {name: '甲肝灭活疫苗(第1针)', month: 18, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: '百白破疫苗(第4针)', month: 18, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+                {name: '2岁体检', month: 24, type: 'checkup', source: '国家基本公共卫生', url: 'https://www.nhc.gov.cn/'},
+                {name: '乙脑减毒活疫苗(第2针)', month: 24, type: 'vaccine', source: '国家免疫规划', url: 'http://www.chinacdc.cn/jkzt/crb/bl/lxxgm/jszl_2285/202301/t20230105_262442.html'},
+            ];
+            
+            const container = document.getElementById('vaccineList');
+            const relevant = vaccines.filter(v => v.month >= ageMonths - 1 && v.month <= ageMonths + 3);
+            
+            if (relevant.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state" style="padding:20px">
+                        <div class="empty-icon">✅</div>
+                        <div style="font-size:12px">近期无疫苗安排</div>
+                    </div>
+                `;
+                return;
             }
             
-            try {
-                const encodedName = encodeURIComponent(filename);
-                const response = await fetch(`/api/url/${encodedName}`);
-                const data = await response.json();
-                
-                if (data.error) {
-                    throw new Error(data.error);
+            container.innerHTML = relevant.map(v => {
+                const diff = v.month - ageMonths;
+                let status, statusClass, timeText;
+                if (diff < 0) {
+                    status = '已过期';
+                    statusClass = 'status-overdue';
+                    timeText = `已过期${Math.abs(diff)}个月`;
+                } else if (diff === 0) {
+                    status = '本月';
+                    statusClass = 'status-pending';
+                    timeText = '本月建议接种';
+                } else {
+                    status = '待接种';
+                    statusClass = 'status-pending';
+                    timeText = `${diff}个月后`;
                 }
                 
-                // 缓存 URL（有效期约 8 小时）
-                fileUrlCache[filename] = data.url;
-                return data.url;
-            } catch (error) {
-                console.error('获取 URL 失败:', error);
-                return null;
-            }
+                return `
+                    <div class="vaccine-item" onclick="window.open('${v.url}', '_blank')" style="cursor:pointer">
+                        <div class="vaccine-info">
+                            <div class="vaccine-name">${v.type === 'checkup' ? '📋' : '💉'} ${v.name}</div>
+                            <div class="vaccine-time">${v.month}月龄 · ${timeText} · <a href="${v.url}" target="_blank" style="color:var(--primary)" onclick="event.stopPropagation()">${v.source}</a></div>
+                        </div>
+                        <div class="vaccine-status ${statusClass}">${status}</div>
+                    </div>
+                `;
+            }).join('');
         }
         
-        // 打开全屏查看
-        async function openModal(index) {
-            currentIndex = index;
-            const file = allFiles[index];
-            const modal = document.getElementById('modal');
-            const content = document.getElementById('modal-content');
-            const info = document.getElementById('modal-info');
+
+        function changeMonth(delta) {
+            currentMonth += delta;
+            if (currentMonth > 12) {
+                currentMonth = 1;
+                currentYear++;
+            } else if (currentMonth < 1) {
+                currentMonth = 12;
+                currentYear--;
+            }
+            loadMonth();
+        }
+        
+        async function loadMonth() {
+            document.getElementById('monthDisplay').textContent = `${currentYear}年${currentMonth}月`;
             
-            // 显示加载中
-            content.innerHTML = `
-                <div class="modal-loading">
-                    <div class="spinner"></div>
-                    正在加载${file.type === 'video' ? '视频' : '原图'}...
-                </div>
-            `;
-            info.textContent = `${file.date} | ${file.name} | ${formatSize(file.size)}`;
-            modal.classList.add('active');
-            document.body.style.overflow = 'hidden';
+            const res = await fetch(`/api/records/${currentYear}/${currentMonth}`);
+            const data = await res.json();
+            heatmapData = data.heatmap || {};
+            renderHeatmap();
             
-            // 获取下载 URL
-            const url = await getFileUrl(file.name);
+            await loadPhotos();
+        }
+        
+        function renderHeatmap() {
+            const container = document.getElementById('heatmap');
+            const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+            const hourSlots = [0, 3, 6, 9, 12, 15, 18, 21];
             
-            if (!url) {
-                content.innerHTML = '<div style="color:white;">加载失败，请重试</div>';
+            // 小时映射到时间段: 0-2->0, 3-5->3, 6-8->6, ...
+            function getHourSlot(hour) {
+                return Math.floor(hour / 3) * 3;
+            }
+            
+            // 按时间段聚合数据
+            const aggregatedData = {};
+            for (let day = 1; day <= daysInMonth; day++) {
+                aggregatedData[day] = {};
+                for (let slot of hourSlots) {
+                    aggregatedData[day][slot] = [];
+                }
+            }
+            
+            // 聚合实际数据到时间段
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dayData = heatmapData[day] || {};
+                for (let hour = 0; hour < 24; hour++) {
+                    if (dayData[hour] && dayData[hour].length > 0) {
+                        const slot = getHourSlot(hour);
+                        aggregatedData[day][slot] = aggregatedData[day][slot].concat(dayData[hour]);
+                    }
+                }
+            }
+            
+            let html = '<div class="heatmap">';
+            
+            html += '<div class="heatmap-row">';
+            html += '<div class="heatmap-cell corner"></div>';
+            for (let day = 1; day <= daysInMonth; day++) {
+                if (day === 1 || day % 5 === 0) {
+                    html += `<div class="heatmap-cell day-label">${day}</div>`;
+                } else {
+                    html += `<div class="heatmap-cell day-label"></div>`;
+                }
+            }
+            html += '</div>';
+            
+            hourSlots.forEach(slot => {
+                html += '<div class="heatmap-row">';
+                html += `<div class="heatmap-cell hour-label">${slot}h</div>`;
+                
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const hourData = aggregatedData[day][slot];
+                    
+                    if (hourData.length === 0) {
+                        html += `<div class="heatmap-cell"></div>`;
+                    } else {
+                        // 显示多个动作的徽章
+                        const badges = hourData.map(r => {
+                            const badgeClass = `badge-${r.type}`;
+                            return `<div class="badge ${badgeClass}"></div>`;
+                        }).join('');
+                        
+                        html += `<div class="heatmap-cell has-data" onclick="showCellDetail(${day}, ${slot})" title="${currentMonth}月${day}日 ${slot}:00-${slot+2}:59">
+                            <div class="badges-stack">${badges}</div>
+                        </div>`;
+                    }
+                }
+                html += '</div>';
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function showCellDetail(day, slot) {
+            // 获取该时间段的所有数据 (slot到slot+2小时)
+            const dayData = heatmapData[day] || {};
+            let allRecords = [];
+            for (let h = slot; h < slot + 3; h++) {
+                if (dayData[h]) {
+                    allRecords = allRecords.concat(dayData[h]);
+                }
+            }
+            
+            if (allRecords.length === 0) return;
+            
+            const typeNames = {feeding: '🍼 喂奶', sleep: '😴 睡眠', diaper: '🩲 换尿布', food: '🥄 辅食'};
+            const typeColors = {feeding: 'var(--feeding)', sleep: 'var(--sleep)', diaper: 'var(--diaper)', food: 'var(--food)'};
+            
+            document.getElementById('recordDetailTitle').textContent = `${currentMonth}月${day}日 ${slot}:00-${slot+2}:59`;
+            
+            document.getElementById('recordDetailList').innerHTML = allRecords.map(r => {
+                const amount = r.amount ? `${r.amount}${r.unit || ''}` : '';
+                const time = r.start_time ? r.start_time.split('T')[1].slice(0, 5) : '';
+                return `
+                    <div class="record-detail-item">
+                        <div class="record-detail-info">
+                            <div class="record-detail-type" style="color:${typeColors[r.type]}">${typeNames[r.type]}</div>
+                            <div class="record-detail-meta">${time} · ${amount || '无数据'}</div>
+                        </div>
+                        <button class="record-delete-btn" onclick="deleteRecord(${r.id})">删除</button>
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('recordDetailModal').classList.add('active');
+        }
+        
+        function closeRecordDetail() {
+            document.getElementById('recordDetailModal').classList.remove('active');
+        }
+        
+        async function deleteRecord(id) {
+            if (!confirm('确定要删除这条记录吗？')) return;
+            
+            await fetch(`/api/records/${id}`, {method: 'DELETE'});
+            closeRecordDetail();
+            loadMonth();
+            loadYesterdaySummary();
+        }
+        
+        async function loadPhotos() {
+            const res = await fetch(`/api/album/${currentYear}/${currentMonth}`);
+            const dateGroups = await res.json();
+            
+            // 按日期排序（最新的在前）
+            const sortedDates = Object.keys(dateGroups).sort().reverse();
+            
+            let photos = [];
+            for (const date of sortedDates) {
+                const files = dateGroups[date];
+                // 每个日期内按时间排序（晚的在前）
+                files.sort((a, b) => (b.time || '').localeCompare(a.time || ''));
+                photos = photos.concat(files);
+            }
+            
+            monthPhotos = photos;
+            
+            document.getElementById('photosTitle').textContent = `${currentMonth}月照片 (${photos.length}张)`;
+            document.getElementById('viewAllBtn').style.display = photos.length > 12 ? 'block' : 'none';
+            
+            const container = document.getElementById('photosList');
+            if (photos.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align:center;padding:40px;color:var(--text-light)">
+                        <div style="font-size:32px;margin-bottom:8px">📷</div>
+                        <div>本月还没有照片</div>
+                    </div>
+                `;
                 return;
             }
             
-            // 加载图片或视频
-            if (file.type === 'video') {
-                content.innerHTML = `<video src="${url}" controls autoplay playsinline style="max-width:100%;max-height:80vh;" onerror="this.parentElement.innerHTML='<div style=\'color:white;\'>视频加载失败</div>'"></video>`;
-            } else {
-                content.innerHTML = `<img src="${url}" alt="" style="max-width:100%;max-height:80vh;" onerror="this.parentElement.innerHTML='<div style=\'color:white;\'>图片加载失败</div>'">`;
-            }
+            const displayPhotos = photos.slice(0, 12);
+            container.innerHTML = renderPhotoGrid(displayPhotos, false);
         }
         
-        // 关闭模态框
-        function closeModal(event) {
-            if (event && event.target !== event.currentTarget && !event.target.classList.contains('modal-close')) {
-                return;
-            }
-            const modal = document.getElementById('modal');
-            const content = document.getElementById('modal-content');
-            modal.classList.remove('active');
-            content.innerHTML = `
-                <div class="modal-loading">
-                    <div class="spinner"></div>
-                    正在加载...
+        function renderPhotoGrid(photos, showTime = true) {
+            return `
+                <div class="photo-grid">
+                    ${photos.map((p, i) => `
+                        <div class="photo-item ${p.type === 'video' ? 'video' : ''}" onclick="viewPhoto(${monthPhotos.indexOf(p)})">
+                            <img src="/thumb/${encodeURIComponent(p.name)}" loading="lazy">
+                            ${showTime && p.time ? `<div class="photo-time">${p.time}</div>` : ''}
+                        </div>
+                    `).join('')}
                 </div>
             `;
-            document.body.style.overflow = '';
         }
         
-        // 导航
-        async function navigate(direction, event) {
-            event.stopPropagation();
-            const newIndex = currentIndex + direction;
-            if (newIndex >= 0 && newIndex < allFiles.length) {
-                await openModal(newIndex);
-            }
+        // 分页相关
+        let currentPhotoPage = 1;
+        const PHOTOS_PER_PAGE = 24;
+        
+        function openAllPhotos() {
+            currentPhotoPage = 1;
+            renderAllPhotosPage();
+            document.getElementById('allPhotosModal').classList.add('active');
         }
         
-        // 刷新文件列表
-        async function refreshFiles() {
-            const btn = document.querySelector('.refresh-btn');
-            btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;"></span>';
+        function renderAllPhotosPage() {
+            const totalPages = Math.ceil(monthPhotos.length / PHOTOS_PER_PAGE);
+            const start = (currentPhotoPage - 1) * PHOTOS_PER_PAGE;
+            const end = start + PHOTOS_PER_PAGE;
+            const pagePhotos = monthPhotos.slice(start, end);
             
-            // 清空 URL 缓存
-            fileUrlCache = {};
+            document.getElementById('allPhotosTitle').textContent = 
+                `${currentMonth}月全部照片 (${monthPhotos.length}张) - 第${currentPhotoPage}/${totalPages}页`;
+            
+            document.getElementById('allPhotosGrid').innerHTML = pagePhotos.map((p, i) => `
+                <div class="photo-item ${p.type === 'video' ? 'video' : ''}" onclick="viewPhoto(${start + i})">
+                    <img src="/thumb/${encodeURIComponent(p.name)}" loading="lazy">
+                    ${p.time ? `<div class="photo-time">${p.time}</div>` : ''}
+                </div>
+            `).join('');
+            
+            // 渲染分页按钮
+            let paginationHtml = `
+                <button class="page-btn" onclick="changePhotoPage(-1)" ${currentPhotoPage === 1 ? 'disabled' : ''}>上一页</button>
+                <span style="padding:8px 16px;font-size:13px">${currentPhotoPage} / ${totalPages}</span>
+                <button class="page-btn" onclick="changePhotoPage(1)" ${currentPhotoPage === totalPages ? 'disabled' : ''}>下一页</button>
+            `;
+            document.getElementById('photosPagination').innerHTML = paginationHtml;
+        }
+        
+        function changePhotoPage(delta) {
+            const totalPages = Math.ceil(monthPhotos.length / PHOTOS_PER_PAGE);
+            currentPhotoPage += delta;
+            if (currentPhotoPage < 1) currentPhotoPage = 1;
+            if (currentPhotoPage > totalPages) currentPhotoPage = totalPages;
+            renderAllPhotosPage();
+        }
+        
+        function closeAllPhotos() {
+            document.getElementById('allPhotosModal').classList.remove('active');
+        }
+        
+        async function viewPhoto(index) {
+            const photo = monthPhotos[index];
+            currentViewerPhoto = photo;
+            
+            const viewer = document.getElementById('imageViewer');
+            const content = document.getElementById('viewerContent');
+            
+            // 显示加载动画
+            content.innerHTML = `
+                <div class="viewer-loading">
+                    <div class="spinner"></div>
+                    <div>加载中...</div>
+                </div>
+            `;
+            viewer.classList.add('active');
             
             try {
-                const response = await fetch('/api/refresh');
-                const data = await response.json();
-                await loadFiles();
-                btn.textContent = '刷新';
-                alert(`刷新成功！共 ${data.count} 个文件`);
-            } catch (error) {
-                btn.textContent = '刷新';
-                alert('刷新失败: ' + error.message);
+                const res = await fetch(`/api/url/${encodeURIComponent(photo.name)}`);
+                const data = await res.json();
+                
+                if (photo.type === 'video') {
+                    content.innerHTML = `<video src="${data.url}" controls autoplay style="max-width:95vw;max-height:80vh"></video>`;
+                } else {
+                    content.innerHTML = `<img src="${data.url}" style="max-width:95vw;max-height:80vh">`;
+                }
+            } catch (e) {
+                content.innerHTML = `
+                    <div style="color:white;text-align:center">
+                        <div style="font-size:48px;margin-bottom:16px">❌</div>
+                        <div>加载失败</div>
+                    </div>
+                `;
             }
         }
         
-        // 格式化文件大小
-        function formatSize(size) {
-            const num = parseInt(size);
-            if (num > 1024 * 1024 * 1024) {
-                return (num / 1024 / 1024 / 1024).toFixed(2) + ' GB';
-            } else if (num > 1024 * 1024) {
-                return (num / 1024 / 1024).toFixed(2) + ' MB';
-            } else if (num > 1024) {
-                return (num / 1024).toFixed(2) + ' KB';
-            }
-            return size + ' B';
+        function closeViewer() {
+            document.getElementById('imageViewer').classList.remove('active');
+            document.getElementById('viewerContent').innerHTML = '';
+            currentViewerPhoto = null;
         }
         
-        // 键盘导航
-        document.addEventListener('keydown', async (e) => {
-            const modal = document.getElementById('modal');
-            if (!modal.classList.contains('active')) return;
+        async function downloadCurrent() {
+            if (!currentViewerPhoto) return;
             
-            if (e.key === 'Escape') closeModal();
-            if (e.key === 'ArrowLeft') await navigate(-1, { stopPropagation: () => {} });
-            if (e.key === 'ArrowRight') await navigate(1, { stopPropagation: () => {} });
-        });
+            try {
+                const res = await fetch(`/api/url/${encodeURIComponent(currentViewerPhoto.name)}`);
+                const data = await res.json();
+                
+                // 创建下载链接
+                const a = document.createElement('a');
+                a.href = data.url;
+                a.download = currentViewerPhoto.name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                // 显示提示
+                const btn = document.querySelector('.viewer-btn');
+                const original = btn.innerHTML;
+                btn.innerHTML = '✓';
+                setTimeout(() => btn.innerHTML = original, 1000);
+            } catch (e) {
+                alert('下载失败');
+            }
+        }
         
-        // 页面加载完成后加载文件
-        loadFiles();
+        function openRecordModal(type) {
+            document.getElementById('recordType').value = type;
+            const titles = {feeding: '喂奶记录', sleep: '睡眠记录', diaper: '换尿布', food: '辅食记录'};
+            document.getElementById('modalTitle').textContent = titles[type];
+            
+            const now = new Date();
+            document.getElementById('recordDate').value = now.toISOString().slice(0, 10);
+            
+            // 设置默认小时
+            const currentHour = now.getHours();
+            
+            // 睡眠特殊处理：显示开始和结束小时
+            if (type === 'sleep') {
+                document.getElementById('sleepTimeGroup').style.display = 'block';
+                document.getElementById('singleTimeGroup').style.display = 'none';
+                document.getElementById('sleepStartHour').value = currentHour;
+                document.getElementById('sleepEndHour').value = '';
+            } else {
+                document.getElementById('sleepTimeGroup').style.display = 'none';
+                document.getElementById('singleTimeGroup').style.display = 'block';
+                document.getElementById('recordHour').value = currentHour;
+            }
+            
+            // 只有喂奶显示毫升
+            document.getElementById('amountGroup').style.display = type === 'feeding' ? 'block' : 'none';
+            
+            document.getElementById('recordModal').classList.add('active');
+        }
+        
+        function closeModal() {
+            document.getElementById('recordModal').classList.remove('active');
+        }
+        
+        function openBabyModal() {
+            document.getElementById('babyModal').classList.add('active');
+        }
+        
+        function closeBabyModal() {
+            document.getElementById('babyModal').classList.remove('active');
+        }
+        
+        function openGrowthModal() {
+            document.getElementById('growthDate').value = new Date().toISOString().slice(0, 10);
+            document.getElementById('growthModal').classList.add('active');
+        }
+        
+        function closeGrowthModal() {
+            document.getElementById('growthModal').classList.remove('active');
+        }
+        
+        async function saveRecord(e) {
+            e.preventDefault();
+            const form = e.target;
+            const formData = new FormData(form);
+            const type = document.getElementById('recordType').value;
+            const date = formData.get('date');
+            
+            let start_time, end_time, amount, unit;
+            
+            if (type === 'sleep') {
+                // 睡眠：计算时长
+                const startHour = parseInt(formData.get('start_hour'));
+                const endHour = parseInt(formData.get('end_hour'));
+                start_time = `${date}T${String(startHour).padStart(2,'0')}:00:00`;
+                
+                if (!isNaN(endHour)) {
+                    end_time = `${date}T${String(endHour).padStart(2,'0')}:00:00`;
+                    // 计算睡眠时长（分钟）
+                    let duration = (endHour - startHour) * 60;
+                    if (duration < 0) duration += 24 * 60; // 跨夜
+                    amount = duration;
+                    unit = 'min';
+                }
+            } else {
+                const hour = parseInt(formData.get('hour'));
+                start_time = `${date}T${String(hour).padStart(2,'0')}:00:00`;
+                
+                if (type === 'feeding') {
+                    amount = formData.get('amount') || null;
+                    unit = 'ml';
+                }
+            }
+            
+            const data = {
+                type: type,
+                start_time: start_time,
+                end_time: end_time,
+                amount: amount,
+                unit: unit
+            };
+            
+            await fetch('/api/records', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            
+            closeModal();
+            loadMonth();
+            loadYesterdaySummary();
+        }
+        
+        async function saveBaby(e) {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(e.target));
+            
+            await fetch('/api/baby', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            
+            closeBabyModal();
+            loadBaby();
+        }
+        
+        async function saveGrowth(e) {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(e.target));
+            
+            await fetch('/api/growth', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            
+            closeGrowthModal();
+            loadGrowth();
+        }
+        
+        document.querySelectorAll('.modal').forEach(m => {
+            m.onclick = (e) => { if (e.target === m) m.classList.remove('active'); };
+        });
     </script>
 </body>
 </html>

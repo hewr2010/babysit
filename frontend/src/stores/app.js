@@ -1,0 +1,224 @@
+import { defineStore } from 'pinia'
+import { ref, computed } from 'vue'
+import dayjs from 'dayjs'
+
+const API_BASE = '/api'
+
+export const useAppStore = defineStore('app', () => {
+  // State
+  const baby = ref(null)
+  const currentYear = ref(dayjs().year())
+  const currentMonth = ref(dayjs().month() + 1)
+  const heatmapData = ref({})
+  const records = ref([])
+  const photos = ref([])
+  const growthRecords = ref([])
+  const yesterdaySummary = ref({})
+  const loading = ref(false)
+  
+  // Getters
+  const babyAge = computed(() => {
+    if (!baby.value?.birthday) return null
+    const birth = dayjs(baby.value.birthday)
+    const now = dayjs()
+    let months = now.diff(birth, 'month')
+    if (now.date() < birth.date()) months--
+    return Math.max(0, months)
+  })
+  
+  const monthDisplay = computed(() => {
+    return `${currentYear.value}年${currentMonth.value}月`
+  })
+  
+  const daysInMonth = computed(() => {
+    return dayjs(`${currentYear.value}-${currentMonth.value}`).daysInMonth()
+  })
+  
+  // Actions
+  async function fetchBaby() {
+    const res = await fetch(`${API_BASE}/baby`)
+    baby.value = await res.json()
+  }
+  
+  async function saveBaby(data) {
+    await fetch(`${API_BASE}/baby`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    await fetchBaby()
+  }
+  
+  async function fetchMonthData() {
+    loading.value = true
+    const res = await fetch(`${API_BASE}/records/${currentYear.value}/${currentMonth.value}`)
+    const data = await res.json()
+    heatmapData.value = data.heatmap || {}
+    records.value = data.records || []
+    loading.value = false
+  }
+  
+  async function addRecord(data) {
+    await fetch(`${API_BASE}/records`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    await fetchMonthData()
+    await fetchYesterdaySummary()
+  }
+  
+  async function deleteRecord(id) {
+    await fetch(`${API_BASE}/records/${id}`, { method: 'DELETE' })
+    await fetchMonthData()
+    await fetchYesterdaySummary()
+  }
+  
+  const photosByDate = ref({})
+  
+  async function fetchPhotos() {
+    const res = await fetch(`${API_BASE}/album/${currentYear.value}/${currentMonth.value}`)
+    const dateGroups = await res.json()
+    
+    // 按日期分组，保持结构
+    photosByDate.value = dateGroups
+    
+    // Flatten for backward compatibility
+    const sortedDates = Object.keys(dateGroups).sort().reverse()
+    let allPhotos = []
+    for (const date of sortedDates) {
+      const files = dateGroups[date]
+      files.sort((a, b) => (b.time || '').localeCompare(a.time || ''))
+      allPhotos = allPhotos.concat(files)
+    }
+    photos.value = allPhotos
+  }
+  
+  async function fetchGrowth() {
+    const res = await fetch(`${API_BASE}/growth`)
+    growthRecords.value = await res.json()
+  }
+  
+  async function addGrowth(data) {
+    await fetch(`${API_BASE}/growth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    await fetchGrowth()
+  }
+  
+  async function deleteGrowth(id) {
+    await fetch(`${API_BASE}/growth/${id}`, { method: 'DELETE' })
+    await fetchGrowth()
+  }
+  
+  async function fetchYesterdaySummary() {
+    const res = await fetch(`${API_BASE}/summary/yesterday`)
+    yesterdaySummary.value = await res.json()
+  }
+  
+  function changeMonth(delta) {
+    let newMonth = currentMonth.value + delta
+    let newYear = currentYear.value
+    
+    if (newMonth > 12) {
+      newMonth = 1
+      newYear++
+    } else if (newMonth < 1) {
+      newMonth = 12
+      newYear--
+    }
+    
+    currentMonth.value = newMonth
+    currentYear.value = newYear
+    
+    // 同步URL参数
+    updateURL()
+    
+    fetchMonthData()
+    fetchPhotos()
+  }
+  
+  function setMonth(year, month) {
+    currentYear.value = year
+    currentMonth.value = month
+    updateURL()
+    fetchMonthData()
+    fetchPhotos()
+  }
+  
+  function updateURL() {
+    const path = `/${currentYear.value}/${currentMonth.value}`
+    window.history.replaceState({}, '', path)
+  }
+  
+  function loadFromURL() {
+    const path = window.location.pathname
+    const match = path.match(/^\/(\d{4})\/(\d{1,2})$/)
+    
+    if (match) {
+      const year = parseInt(match[1])
+      const month = parseInt(match[2])
+      
+      if (year && month >= 1 && month <= 12) {
+        currentYear.value = year
+        currentMonth.value = month
+      }
+    }
+  }
+  
+  async function refreshPhotos() {
+    loading.value = true
+    await fetch(`${API_BASE}/album/refresh`)
+    await fetchPhotos()
+    loading.value = false
+  }
+  
+  async function init() {
+    loadFromURL()  // 先加载URL参数
+    await fetchBaby()
+    await Promise.all([
+      fetchMonthData(),
+      fetchPhotos(),
+      fetchGrowth(),
+      fetchYesterdaySummary()
+    ])
+    updateURL()  // 更新URL保证一致
+  }
+  
+  const latestGrowthRecord = computed(() => {
+    return growthRecords.value[0] || null
+  })
+  
+  return {
+    baby,
+    currentYear,
+    currentMonth,
+    heatmapData,
+    records,
+    photos,
+    photosByDate,
+    growthRecords,
+    yesterdaySummary,
+    loading,
+    babyAge,
+    monthDisplay,
+    daysInMonth,
+    latestGrowthRecord,
+    fetchBaby,
+    saveBaby,
+    fetchMonthData,
+    addRecord,
+    deleteRecord,
+    fetchPhotos,
+    refreshPhotos,
+    fetchGrowth,
+    addGrowth,
+    deleteGrowth,
+    fetchYesterdaySummary,
+    changeMonth,
+    setMonth,
+    init
+  }
+})
