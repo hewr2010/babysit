@@ -33,9 +33,9 @@
         <div class="history-item selected">
           <div class="history-date">{{ selectedRecord.date }}</div>
           <div class="history-data">
-            <span>📏 {{ selectedRecord.height }}cm</span>
+            <span v-if="selectedRecord.height && selectedRecord.height > 0">📏 {{ selectedRecord.height }}cm</span>
             <span>⚖️ {{ selectedRecord.weight }}g</span>
-            <span>🧠 {{ selectedRecord.head }}cm</span>
+            <span v-if="selectedRecord.head && selectedRecord.head > 0">🧠 {{ selectedRecord.head }}cm</span>
           </div>
           <button class="delete-btn" @click="handleDelete(selectedRecord.id)" title="删除">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -79,24 +79,27 @@ function handleDelete(id) {
 
 // 只显示最新一条有效记录的值（过滤掉空值）
 const latestGrowth = computed(() => {
-  // 找到第一条所有字段都有有效值的记录
+  // 找到第一条有体重有效值的记录（体重是必须的，身高头围可选）
   const validRecord = store.growthRecords.find(r => {
-    return r.height && r.weight && r.head && 
-           r.height !== '' && r.weight !== '' && r.head !== ''
+    return r.weight && r.weight !== '' && r.weight > 0
   })
   
   if (!validRecord) {
     return [
       { label: '身高', value: '-', unit: 'cm' },
-      { label: '体重', value: '-', unit: 'kg' },
+      { label: '体重', value: '-', unit: 'g' },
       { label: '头围', value: '-', unit: 'cm' }
     ]
   }
   
+  // 只有体重要显示，身高头围如果没有数据则显示'-'
+  const hasHeight = validRecord.height && validRecord.height > 0
+  const hasHead = validRecord.head && validRecord.head > 0
+  
   return [
-    { label: '身高', value: validRecord.height, unit: 'cm' },
+    { label: '身高', value: hasHeight ? validRecord.height : '-', unit: 'cm' },
     { label: '体重', value: validRecord.weight, unit: 'g' },
-    { label: '头围', value: validRecord.head, unit: 'cm' }
+    { label: '头围', value: hasHead ? validRecord.head : '-', unit: 'cm' }
   ]
 })
 
@@ -121,7 +124,7 @@ const chartOption = computed(() => {
         let result = params[0].axisValue + '<br/>'
         params.forEach(param => {
           if (param.seriesName.includes('体重')) {
-            result += `${param.marker}${param.seriesName}: ${(param.value / 1000).toFixed(2)}kg<br/>`
+            result += `${param.marker}${param.seriesName}: ${param.value}g<br/>`
           } else {
             result += `${param.marker}${param.seriesName}: ${param.value}<br/>`
           }
@@ -129,7 +132,7 @@ const chartOption = computed(() => {
         return result
       }
     },
-    legend: { data: ['身高(cm)', '体重(kg)', '头围(cm)'], bottom: 0 },
+    legend: { data: ['身高(cm)', '体重(g)', '头围(cm)'], bottom: 0 },
     grid: { left: '3%', right: '4%', bottom: '15%', top: '10%', containLabel: true },
     xAxis: { 
       type: 'category', 
@@ -146,9 +149,9 @@ const chartOption = computed(() => {
         itemStyle: { color: '#ec4899' }
       },
       { 
-        name: '体重(kg)', 
+        name: '体重(g)', 
         type: 'line', 
-        data: records.map(r => r.weight / 1000),  // 转换为kg显示
+        data: records.map(r => r.weight),  // 以g为单位显示
         smooth: true,
         itemStyle: { color: '#22c55e' }
       },
