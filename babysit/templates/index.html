@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>babysit</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f5f5f5;
+            padding-bottom: 60px;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+        
+        .header .subtitle {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 4px;
+        }
+        
+        .refresh-btn {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255,255,255,0.2);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        .date-section {
+            margin: 16px;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        
+        .date-header {
+            background: #fafafa;
+            padding: 12px 16px;
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .date-count {
+            font-size: 12px;
+            color: #999;
+            font-weight: normal;
+        }
+        
+        .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2px;
+            padding: 2px;
+        }
+        
+        .photo-item {
+            aspect-ratio: 1;
+            background: #eee;
+            position: relative;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        
+        .photo-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.2s;
+            display: block;
+        }
+        
+        .photo-item:active img {
+            transform: scale(0.95);
+        }
+        
+        .photo-item.video::after {
+            content: "▶";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+        
+        .spinner {
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* 全屏查看 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .modal.active {
+            display: flex;
+        }
+        
+        .modal img, .modal video {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        
+        .modal-close {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: white;
+            font-size: 32px;
+            cursor: pointer;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+        }
+        
+        .modal-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            color: white;
+            font-size: 40px;
+            cursor: pointer;
+            padding: 20px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-prev { left: 10px; }
+        .modal-next { right: 10px; }
+        
+        .modal-info {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            color: white;
+            font-size: 14px;
+            padding: 10px;
+            background: rgba(0,0,0,0.5);
+        }
+        
+        .modal-loading {
+            color: white;
+            font-size: 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .modal-loading .spinner {
+            width: 40px;
+            height: 40px;
+            border-width: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>babysit</h1>
+        <div class="subtitle" id="subtitle">加载中...</div>
+        <button class="refresh-btn" onclick="refreshFiles()">刷新</button>
+    </div>
+    
+    <div id="content">
+        <div class="loading">
+            <div class="spinner"></div>
+            正在加载照片...
+        </div>
+    </div>
+    
+    <!-- 全屏查看模态框 -->
+    <div class="modal" id="modal" onclick="closeModal(event)">
+        <div class="modal-close" onclick="closeModal()">×</div>
+        <div class="modal-nav modal-prev" onclick="navigate(-1, event)">‹</div>
+        <div class="modal-nav modal-next" onclick="navigate(1, event)">›</div>
+        <div id="modal-content">
+            <div class="modal-loading">
+                <div class="spinner"></div>
+                正在加载...
+            </div>
+        </div>
+        <div class="modal-info" id="modal-info"></div>
+    </div>
+
+    <script>
+        let allFiles = [];
+        let currentIndex = 0;
+        let fileUrlCache = {};  // 缓存文件 URL
+        
+        // 加载文件列表
+        async function loadFiles() {
+            try {
+                const response = await fetch('/api/files');
+                const data = await response.json();
+                renderFiles(data);
+            } catch (error) {
+                document.getElementById('content').innerHTML = 
+                    `<div class="loading">加载失败: ${error.message}</div>`;
+            }
+        }
+        
+        // 渲染文件
+        function renderFiles(dateGroups) {
+            const content = document.getElementById('content');
+            const subtitle = document.getElementById('subtitle');
+            
+            allFiles = [];
+            let totalCount = 0;
+            
+            let html = '';
+            
+            for (const [date, files] of Object.entries(dateGroups)) {
+                totalCount += files.length;
+                
+                files.forEach((file) => {
+                    file.globalIndex = allFiles.length;
+                    file.date = date;
+                    allFiles.push(file);
+                });
+                
+                html += `
+                    <div class="date-section">
+                        <div class="date-header">
+                            <span>${date}</span>
+                            <span class="date-count">${files.length} 张</span>
+                        </div>
+                        <div class="photo-grid">
+                `;
+                
+                files.forEach((file) => {
+                    const isVideo = file.type === 'video';
+                    const videoClass = isVideo ? 'video' : '';
+                    // 使用缩略图接口
+                    const thumbUrl = `/thumb/${encodeURIComponent(file.name)}`;
+                    
+                    html += `
+                        <div class="photo-item ${videoClass}" 
+                             onclick="openModal(${file.globalIndex})"
+                             data-name="${file.name}">
+                            <img src="${thumbUrl}" loading="lazy" alt="" onerror="this.style.opacity=0.3">
+                        </div>
+                    `;
+                });
+                
+                html += '</div></div>';
+            }
+            
+            content.innerHTML = html;
+            subtitle.textContent = `共 ${totalCount} 张照片和视频`;
+        }
+        
+        // 获取文件下载 URL
+        async function getFileUrl(filename) {
+            // 检查缓存
+            if (fileUrlCache[filename]) {
+                return fileUrlCache[filename];
+            }
+            
+            try {
+                const encodedName = encodeURIComponent(filename);
+                const response = await fetch(`/api/url/${encodedName}`);
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                
+                // 缓存 URL（有效期约 8 小时）
+                fileUrlCache[filename] = data.url;
+                return data.url;
+            } catch (error) {
+                console.error('获取 URL 失败:', error);
+                return null;
+            }
+        }
+        
+        // 打开全屏查看
+        async function openModal(index) {
+            currentIndex = index;
+            const file = allFiles[index];
+            const modal = document.getElementById('modal');
+            const content = document.getElementById('modal-content');
+            const info = document.getElementById('modal-info');
+            
+            // 显示加载中
+            content.innerHTML = `
+                <div class="modal-loading">
+                    <div class="spinner"></div>
+                    正在加载${file.type === 'video' ? '视频' : '原图'}...
+                </div>
+            `;
+            info.textContent = `${file.date} | ${file.name} | ${formatSize(file.size)}`;
+            modal.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            
+            // 获取下载 URL
+            const url = await getFileUrl(file.name);
+            
+            if (!url) {
+                content.innerHTML = '<div style="color:white;">加载失败，请重试</div>';
+                return;
+            }
+            
+            // 加载图片或视频
+            if (file.type === 'video') {
+                content.innerHTML = `<video src="${url}" controls autoplay playsinline style="max-width:100%;max-height:80vh;" onerror="this.parentElement.innerHTML='<div style=\'color:white;\'>视频加载失败</div>'"></video>`;
+            } else {
+                content.innerHTML = `<img src="${url}" alt="" style="max-width:100%;max-height:80vh;" onerror="this.parentElement.innerHTML='<div style=\'color:white;\'>图片加载失败</div>'">`;
+            }
+        }
+        
+        // 关闭模态框
+        function closeModal(event) {
+            if (event && event.target !== event.currentTarget && !event.target.classList.contains('modal-close')) {
+                return;
+            }
+            const modal = document.getElementById('modal');
+            const content = document.getElementById('modal-content');
+            modal.classList.remove('active');
+            content.innerHTML = `
+                <div class="modal-loading">
+                    <div class="spinner"></div>
+                    正在加载...
+                </div>
+            `;
+            document.body.style.overflow = '';
+        }
+        
+        // 导航
+        async function navigate(direction, event) {
+            event.stopPropagation();
+            const newIndex = currentIndex + direction;
+            if (newIndex >= 0 && newIndex < allFiles.length) {
+                await openModal(newIndex);
+            }
+        }
+        
+        // 刷新文件列表
+        async function refreshFiles() {
+            const btn = document.querySelector('.refresh-btn');
+            btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;display:inline-block;vertical-align:middle;"></span>';
+            
+            // 清空 URL 缓存
+            fileUrlCache = {};
+            
+            try {
+                const response = await fetch('/api/refresh');
+                const data = await response.json();
+                await loadFiles();
+                btn.textContent = '刷新';
+                alert(`刷新成功！共 ${data.count} 个文件`);
+            } catch (error) {
+                btn.textContent = '刷新';
+                alert('刷新失败: ' + error.message);
+            }
+        }
+        
+        // 格式化文件大小
+        function formatSize(size) {
+            const num = parseInt(size);
+            if (num > 1024 * 1024 * 1024) {
+                return (num / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+            } else if (num > 1024 * 1024) {
+                return (num / 1024 / 1024).toFixed(2) + ' MB';
+            } else if (num > 1024) {
+                return (num / 1024).toFixed(2) + ' KB';
+            }
+            return size + ' B';
+        }
+        
+        // 键盘导航
+        document.addEventListener('keydown', async (e) => {
+            const modal = document.getElementById('modal');
+            if (!modal.classList.contains('active')) return;
+            
+            if (e.key === 'Escape') closeModal();
+            if (e.key === 'ArrowLeft') await navigate(-1, { stopPropagation: () => {} });
+            if (e.key === 'ArrowRight') await navigate(1, { stopPropagation: () => {} });
+        });
+        
+        // 页面加载完成后加载文件
+        loadFiles();
+    </script>
+</body>
+</html>
