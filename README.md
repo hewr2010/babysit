@@ -25,6 +25,9 @@ bypy info
 
 ```bash
 python babysit/app.py
+
+# 生产模式
+uvicorn babysit.asgi:app --host 0.0.0.0 --port 8080 --workers 4
 ```
 
 访问 http://localhost:8080

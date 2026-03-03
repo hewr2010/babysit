@@ -212,7 +212,7 @@ const chartOption = computed(() => {
       }
     },
     legend: { data: legendData, bottom: 0 },
-    grid: { left: '3%', right: '4%', bottom: '15%', top: '10%', containLabel: true },
+    grid: { left: '3%', right: '4%', bottom: '15%', top: '20%', containLabel: true },
     xAxis: {
       type: 'category',
       data: allDates,

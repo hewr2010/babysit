@@ -8,7 +8,11 @@ from urllib.parse import quote, unquote
 import requests
 from PIL import Image
 from PIL.ExifTags import TAGS
+from pillow_heif import register_heif_opener
 from .config import CACHE_DIR, BAIDU_REMOTE_PATH, PCS_API_BASE
+
+# 注册 HEIF/HEIC 支持
+register_heif_opener()
 
 def get_access_token():
     """从 bypy 配置读取 token"""

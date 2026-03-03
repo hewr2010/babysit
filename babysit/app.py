@@ -233,12 +233,6 @@ def create_app():
     
     return app
 
-app = create_app()
-with app.app_context():
-    baby = get_baby()
-    if baby:
-        age = calculate_age(baby['birthday'])
-        print(f"✓ 宝宝: {baby['name']}, {age}个月")
-
 if __name__ == "__main__":
+    app = create_app()
     app.run(host="0.0.0.0", port=8080, debug=True)
