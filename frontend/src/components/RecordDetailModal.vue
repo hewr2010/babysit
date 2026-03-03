@@ -34,12 +34,12 @@ import { useModalStore } from '../stores/modal'
 const store = useAppStore()
 const modalStore = useModalStore()
 
-const typeNames = { feeding: '喂奶', sleep: '睡眠', diaper: '换尿布' }
-const typeIcons = { feeding: '🍼', sleep: '😴', diaper: '🩲' }
+const typeNames = { feeding: '喂奶', poop: '大便', pee: '小便' }
+const typeIcons = { feeding: '🍼', poop: '💩', pee: '💧' }
 const typeColors = { 
   feeding: 'var(--feeding)', 
-  sleep: 'var(--sleep)', 
-  diaper: 'var(--diaper)'
+  poop: '#8b4513', 
+  pee: '#3b82f6'
 }
 
 const data = computed(() => modalStore.recordDetailData || {})

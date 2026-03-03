@@ -7,9 +7,13 @@
       <span class="action-icon">{{ action.icon }}</span>
       <span class="action-label">{{ action.label }}</span>
     </button>
-    <button class="action-btn" @click="modalStore.growth = true">
+    <button class="action-btn height-btn" @click="modalStore.openGrowth('height')">
       <span class="action-icon">📏</span>
-      <span class="action-label">生长</span>
+      <span class="action-label">身高</span>
+    </button>
+    <button class="action-btn weight-btn" @click="modalStore.openGrowth('weight')">
+      <span class="action-icon">⚖️</span>
+      <span class="action-label">体重</span>
     </button>
   </div>
 </template>
@@ -21,8 +25,8 @@ const modalStore = useModalStore()
 
 const actions = [
   { type: 'feeding', icon: '🍼', label: '喂奶' },
-  { type: 'sleep', icon: '😴', label: '睡眠' },
-  { type: 'diaper', icon: '🩲', label: '尿布' },
+  { type: 'poop', icon: '💩', label: '大便' },
+  { type: 'pee', icon: '💧', label: '小便' },
 ]
 </script>
 

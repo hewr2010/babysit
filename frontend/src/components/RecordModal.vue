@@ -11,32 +11,12 @@
               <input v-model="form.date" type="date" required />
             </div>
             
-            <template v-if="isSleep">
-              <div class="form-row">
-                <div class="form-group">
-                  <label>开始</label>
-                  <select v-model="form.startHour">
-                    <option v-for="h in 24" :key="h" :value="h-1">{{ h-1 }}:00</option>
-                  </select>
-                </div>
-                <div class="form-group">
-                  <label>结束</label>
-                  <select v-model="form.endHour">
-                    <option value="">--</option>
-                    <option v-for="h in 24" :key="h" :value="h-1">{{ h-1 }}:00</option>
-                  </select>
-                </div>
-              </div>
-            </template>
-            
-            <template v-else>
-              <div class="form-group">
-                <label>时间</label>
-                <select v-model="form.hour">
-                  <option v-for="h in 24" :key="h" :value="h-1">{{ h-1 }}:00</option>
-                </select>
-              </div>
-            </template>
+            <div class="form-group">
+              <label>时间</label>
+              <select v-model="form.hour">
+                <option v-for="h in 24" :key="h" :value="h-1">{{ h-1 }}:00</option>
+              </select>
+            </div>
             
             <div v-if="isFeeding" class="form-group">
               <label>奶量 (ml)</label>
@@ -62,19 +42,16 @@ const modalStore = useModalStore()
 
 const titles = {
   feeding: '喂奶记录',
-  sleep: '睡眠记录',
-  diaper: '换尿布'
+  poop: '大便记录',
+  pee: '小便记录'
 }
 
 const title = computed(() => titles[modalStore.recordType] || '添加记录')
-const isSleep = computed(() => modalStore.recordType === 'sleep')
 const isFeeding = computed(() => modalStore.recordType === 'feeding')
 
 const form = reactive({
   date: dayjs().format('YYYY-MM-DD'),
   hour: dayjs().hour(),
-  startHour: dayjs().hour(),
-  endHour: '',
   amount: ''
 })
 
@@ -82,8 +59,6 @@ watch(() => modalStore.record, (val) => {
   if (val) {
     form.date = dayjs().format('YYYY-MM-DD')
     form.hour = dayjs().hour()
-    form.startHour = dayjs().hour()
-    form.endHour = ''
     form.amount = ''
   }
 })
@@ -91,16 +66,9 @@ watch(() => modalStore.record, (val) => {
 function handleSubmit() {
   const data = {
     type: modalStore.recordType,
-    start_time: `${form.date}T${String(isSleep.value ? form.startHour : form.hour).padStart(2, '0')}:00:00`,
+    start_time: `${form.date}T${String(form.hour).padStart(2, '0')}:00:00`,
     amount: form.amount || null,
-    unit: isFeeding.value ? 'ml' : isSleep.value ? 'min' : null
-  }
-  
-  if (isSleep.value && form.endHour !== '') {
-    data.end_time = `${form.date}T${String(form.endHour).padStart(2, '0')}:00:00`
-    let duration = (form.endHour - form.startHour) * 60
-    if (duration < 0) duration += 24 * 60
-    data.amount = duration
+    unit: isFeeding.value ? 'ml' : null
   }
   
   store.addRecord(data)

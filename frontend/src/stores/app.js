@@ -26,6 +26,25 @@ export const useAppStore = defineStore('app', () => {
     return Math.max(0, months)
   })
   
+  // 宝宝年龄显示（不足一月显示日龄）
+  const babyAgeDisplay = computed(() => {
+    if (!baby.value?.birthday) return null
+    const birth = dayjs(baby.value.birthday)
+    const now = dayjs()
+    const totalDays = now.diff(birth, 'day')
+    
+    // 如果不足30天，显示日龄
+    if (totalDays < 30) {
+      return `${totalDays}天`
+    }
+    
+    // 否则显示月龄
+    let months = now.diff(birth, 'month')
+    if (now.date() < birth.date()) months--
+    months = Math.max(0, months)
+    return `${months}个月`
+  })
+  
   const monthDisplay = computed(() => {
     return `${currentYear.value}年${currentMonth.value}月`
   })
@@ -203,6 +222,7 @@ export const useAppStore = defineStore('app', () => {
     yesterdaySummary,
     loading,
     babyAge,
+    babyAgeDisplay,
     monthDisplay,
     daysInMonth,
     latestGrowthRecord,

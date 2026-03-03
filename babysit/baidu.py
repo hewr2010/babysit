@@ -270,6 +270,56 @@ def get_download_url(filename):
         print(f"Error getting download URL for {filename}: {e}")
         return None, str(e)
 
+def extract_livp_video(filename):
+    """从 .livp 文件中提取视频部分"""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext != '.livp':
+        return None
+    
+    # 尝试从缓存读取
+    cache_key = f"{filename}_video"
+    cache_file = CACHE_DIR / "livp_videos" / f"{quote(cache_key, safe='')}.mov"
+    cache_file.parent.mkdir(exist_ok=True)
+    
+    if cache_file.exists():
+        with open(cache_file, 'rb') as f:
+            return io.BytesIO(f.read())
+    
+    # 下载 .livp 文件
+    url, err = get_download_url(filename)
+    if err or not url:
+        return None
+    
+    try:
+        resp = requests.get(url, timeout=60)
+        if resp.status_code != 200:
+            return None
+        
+        import zipfile
+        # .livp 实际是 ZIP 文件，包含 HEIC 图片和 MOV 视频
+        with zipfile.ZipFile(io.BytesIO(resp.content), 'r') as z:
+            # 找到 MOV 文件
+            mov_name = None
+            for name in z.namelist():
+                if name.lower().endswith('.mov'):
+                    mov_name = name
+                    break
+            
+            if not mov_name:
+                return None
+            
+            # 读取 MOV 文件
+            mov_data = z.read(mov_name)
+            
+            # 保存到缓存
+            with open(cache_file, 'wb') as f:
+                f.write(mov_data)
+            
+            return io.BytesIO(mov_data)
+    except Exception as e:
+        print(f"Error extracting video from {filename}: {e}")
+        return None
+
 def get_thumbnail_data(filename, size=(200, 200)):
     """获取缩略图数据（图片或视频封面）"""
     ext = os.path.splitext(filename)[1].lower()

@@ -26,8 +26,9 @@ const store = useAppStore()
 const babyName = computed(() => store.baby?.name || '青青')
 const babyAgeText = computed(() => {
   if (!store.baby?.birthday) return '女宝 · 2026-02-12'
-  const age = store.babyAge
-  return `女宝 · ${age}个月 · ${store.baby.birthday}`
+  const gender = store.baby?.gender === '男' ? '男宝' : '女宝'
+  const age = store.babyAgeDisplay
+  return `${gender} · ${age} · ${store.baby.birthday}`
 })
 </script>
 

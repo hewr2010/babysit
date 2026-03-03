@@ -45,9 +45,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS growth (
             id INTEGER PRIMARY KEY,
             date DATE NOT NULL,
-            height REAL NOT NULL,
-            weight REAL NOT NULL,
-            head REAL NOT NULL,
+            metric_type TEXT NOT NULL,
+            value REAL NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -115,18 +114,29 @@ def delete_record(id):
 
 # ===== 生长记录 =====
 def get_growth_records():
-    """获取所有生长记录"""
+    """获取所有生长记录 (按指标类型分开)"""
     db = get_db()
-    rows = db.execute("SELECT * FROM growth ORDER BY date DESC").fetchall()
+    rows = db.execute("SELECT * FROM growth ORDER BY date DESC, metric_type").fetchall()
     return [dict(r) for r in rows]
 
 def add_growth(data):
-    """添加生长记录"""
+    """添加生长记录 (支持单个或多个指标)"""
     db = get_db()
-    db.execute(
-        "INSERT INTO growth (date, height, weight, head) VALUES (?, ?, ?, ?)",
-        (data['date'], data.get('height'), data.get('weight'), data.get('head'))
-    )
+    date = data['date']
+    
+    # 分别添加每个指标
+    if data.get('height'):
+        db.execute(
+            "INSERT INTO growth (date, metric_type, value) VALUES (?, ?, ?)",
+            (date, 'height', float(data['height']))
+        )
+    
+    if data.get('weight'):
+        db.execute(
+            "INSERT INTO growth (date, metric_type, value) VALUES (?, ?, ?)",
+            (date, 'weight', float(data['weight']))
+        )
+    
     db.commit()
 
 def delete_growth(id):
@@ -142,30 +152,31 @@ def get_yesterday_summary():
     
     yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
     
-    # 睡眠总时长（分钟）
-    sleep_row = db.execute(
-        "SELECT SUM(amount) as total FROM records WHERE type='sleep' AND date(start_time) = ?",
-        (yesterday,)
-    ).fetchone()
-    sleep_total = sleep_row['total'] or 0
-    sleep_hours = round(sleep_total / 60, 1) if sleep_total else 0
-    
-    # 喂奶次数
+    # 喂奶次数和总量
     feeding_row = db.execute(
-        "SELECT COUNT(*) as count FROM records WHERE type='feeding' AND date(start_time) = ?",
+        "SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as total FROM records WHERE type='feeding' AND date(start_time) = ?",
         (yesterday,)
     ).fetchone()
     feeding_count = feeding_row['count']
+    feeding_total = feeding_row['total']
     
-    # 换尿布次数
-    diaper_row = db.execute(
-        "SELECT COUNT(*) as count FROM records WHERE type='diaper' AND date(start_time) = ?",
+    # 大便次数
+    poop_row = db.execute(
+        "SELECT COUNT(*) as count FROM records WHERE type='poop' AND date(start_time) = ?",
         (yesterday,)
     ).fetchone()
-    diaper_count = diaper_row['count']
+    poop_count = poop_row['count']
+    
+    # 小便次数
+    pee_row = db.execute(
+        "SELECT COUNT(*) as count FROM records WHERE type='pee' AND date(start_time) = ?",
+        (yesterday,)
+    ).fetchone()
+    pee_count = pee_row['count']
     
     return {
-        'sleep': f"{sleep_hours}h" if sleep_hours else '-',
         'feeding_count': feeding_count or '-',
-        'diaper_count': diaper_count or '-'
+        'feeding_total': feeding_total or 0,
+        'poop_count': poop_count or '-',
+        'pee_count': pee_count or '-'
     }

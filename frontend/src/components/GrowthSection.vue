@@ -2,11 +2,6 @@
   <section class="growth-section animate-fadeInUp stagger-2">
     <div class="section-header">
       <h2 class="section-title">生长记录</h2>
-      <button class="add-btn" @click="modalStore.growth = true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-      </button>
     </div>
     
     <div v-if="store.growthRecords.length > 0" class="growth-content">
@@ -21,28 +16,33 @@
       
       <!-- 生长曲线 -->
       <div class="chart-wrapper">
-        <div class="chart-hint">👆 点击数据点查看详情</div>
         <div class="chart-container">
           <v-chart v-if="chartOption" :option="chartOption" autoresize @click="handleChartClick" />
         </div>
       </div>
       
-      <!-- 选中的记录详情 -->
-      <div v-if="selectedRecord" class="history-section">
-        <h3 class="history-title">记录详情</h3>
-        <div class="history-item selected">
-          <div class="history-date">{{ selectedRecord.date }}</div>
-          <div class="history-data">
-            <span v-if="selectedRecord.height && selectedRecord.height > 0">📏 {{ selectedRecord.height }}cm</span>
-            <span>⚖️ {{ selectedRecord.weight }}g</span>
-            <span v-if="selectedRecord.head && selectedRecord.head > 0">🧠 {{ selectedRecord.head }}cm</span>
+      <!-- 记录列表（点击图表点显示） -->
+      <div v-if="selectedDate && recordsForDate.length > 0" class="history-section">
+        <h3 class="history-title">{{ selectedDate }} 记录</h3>
+        <div class="history-list">
+          <div class="metrics-list">
+            <div v-for="record in recordsForDate" :key="record.id" class="metric-item">
+              <div class="metric-icon">{{ getMetricIcon(record.metric_type) }}</div>
+              <div class="metric-info">
+                <div class="metric-label">{{ getMetricLabel(record.metric_type) }}</div>
+                <div class="metric-value">{{ record.value }}{{ getMetricUnit(record.metric_type) }}</div>
+              </div>
+              <button class="delete-btn" @click="handleDelete(record.id, record.metric_type)" title="删除">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                </svg>
+              </button>
+            </div>
           </div>
-          <button class="delete-btn" @click="handleDelete(selectedRecord.id)" title="删除">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-            </svg>
-          </button>
         </div>
+      </div>
+      <div v-else-if="selectedDate" class="history-section empty-history">
+        <span class="empty-hint">{{ selectedDate }} 无记录</span>
       </div>
     </div>
     
@@ -60,109 +60,187 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
 import { useAppStore } from '../stores/app'
-import { useModalStore } from '../stores/modal'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent])
 
 const store = useAppStore()
-const modalStore = useModalStore()
 
-// 当前选中的记录
-const selectedRecord = ref(null)
+// 选中的日期
+const selectedDate = ref(null)
 
-function handleDelete(id) {
-  if (confirm('确定要删除这条生长记录吗？')) {
+// 处理图表点击事件
+function handleChartClick(params) {
+  selectedDate.value = params.name
+}
+
+// 获取选中日期的记录
+const recordsForDate = computed(() => {
+  if (!selectedDate.value) return []
+  return store.growthRecords
+    .filter(r => r.date === selectedDate.value)
+    .sort((a, b) => {
+      const order = { height: 0, weight: 1 }
+      return order[a.metric_type] - order[b.metric_type]
+    })
+})
+
+// 删除单个指标
+function handleDelete(id, metricType) {
+  const metricNames = { height: '身高', weight: '体重' }
+  if (confirm(`确定要删除这条${metricNames[metricType]}记录吗？`)) {
     store.deleteGrowth(id)
-    selectedRecord.value = null  // 清除选中状态
   }
 }
 
-// 只显示最新一条有效记录的值（过滤掉空值）
-const latestGrowth = computed(() => {
-  // 找到第一条有体重有效值的记录（体重是必须的，身高头围可选）
-  const validRecord = store.growthRecords.find(r => {
-    return r.weight && r.weight !== '' && r.weight > 0
-  })
-  
-  if (!validRecord) {
-    return [
-      { label: '身高', value: '-', unit: 'cm' },
-      { label: '体重', value: '-', unit: 'g' },
-      { label: '头围', value: '-', unit: 'cm' }
-    ]
+// 按指标类型分组
+const metricsByType = computed(() => {
+  const grouped = {
+    height: [],
+    weight: []
   }
   
-  // 只有体重要显示，身高头围如果没有数据则显示'-'
-  const hasHeight = validRecord.height && validRecord.height > 0
-  const hasHead = validRecord.head && validRecord.head > 0
+  store.growthRecords.forEach(record => {
+    if (record.metric_type && grouped[record.metric_type]) {
+      grouped[record.metric_type].push(record)
+    }
+  })
   
+  return grouped
+})
+
+// 最新数据卡片
+const latestGrowth = computed(() => {
   return [
-    { label: '身高', value: hasHeight ? validRecord.height : '-', unit: 'cm' },
-    { label: '体重', value: validRecord.weight, unit: 'g' },
-    { label: '头围', value: hasHead ? validRecord.head : '-', unit: 'cm' }
+    { 
+      label: '身高', 
+      value: metricsByType.value.height[0]?.value || '-', 
+      unit: 'cm' 
+    },
+    { 
+      label: '体重', 
+      value: metricsByType.value.weight[0]?.value || '-', 
+      unit: 'g' 
+    }
   ]
 })
 
-// 图表点击事件
-function handleChartClick(event) {
-  if (event.componentType === 'series') {
-    const dateStr = event.name  // x轴的日期
-    const record = store.growthRecords.find(r => r.date === dateStr)
-    if (record) {
-      selectedRecord.value = record
-    }
-  }
+
+
+// 辅助函数
+function getMetricIcon(type) {
+  const icons = { height: '📏', weight: '⚖️' }
+  return icons[type] || ''
+}
+
+function getMetricLabel(type) {
+  const labels = { height: '身高', weight: '体重' }
+  return labels[type] || ''
+}
+
+function getMetricUnit(type) {
+  const units = { height: 'cm', weight: 'g' }
+  return units[type] || ''
 }
 
 const chartOption = computed(() => {
-  const records = [...store.growthRecords].reverse()
-  const dates = records.map(r => r.date)
+  // 身高和体重各自用独立的日期轴，不混在一起
+  const heightRecords = metricsByType.value.height.slice().reverse() // 按日期升序
+  const weightRecords = metricsByType.value.weight.slice().reverse()
+  
+  // 获取所有日期用于 x 轴（合并去重排序）
+  const heightDates = heightRecords.map(r => r.date)
+  const weightDates = weightRecords.map(r => r.date)
+  const allDates = [...new Set([...heightDates, ...weightDates])].sort()
+  
+  // 构建系列数据 - 每个指标只在自己的日期上有值
+  const series = []
+  const legendData = []
+  
+  if (heightRecords.length > 0) {
+    // 身高数据：只在自己有的日期上显示，其他日期用 null
+    const heightData = allDates.map(date => {
+      const record = heightRecords.find(r => r.date === date)
+      return record ? record.value : null
+    })
+    
+    series.push({
+      name: '身高(cm)',
+      type: 'line',
+      data: heightData,
+      smooth: true,
+      connectNulls: true, // 连接有效点之间的线
+      itemStyle: { color: '#ec4899' },
+      lineStyle: { width: 2 },
+      symbol: 'circle',
+      symbolSize: 6
+    })
+    legendData.push('身高(cm)')
+  }
+  
+  if (weightRecords.length > 0) {
+    // 体重数据：只在自己有的日期上显示，其他日期用 null
+    const weightData = allDates.map(date => {
+      const record = weightRecords.find(r => r.date === date)
+      return record ? record.value : null
+    })
+    
+    series.push({
+      name: '体重(g)',
+      type: 'line',
+      data: weightData,
+      smooth: true,
+      connectNulls: true, // 连接有效点之间的线
+      itemStyle: { color: '#22c55e' },
+      lineStyle: { width: 2 },
+      symbol: 'circle',
+      symbolSize: 6
+    })
+    legendData.push('体重(g)')
+  }
+  
   return {
-    tooltip: { 
+    tooltip: {
       trigger: 'axis',
       formatter: (params) => {
         let result = params[0].axisValue + '<br/>'
         params.forEach(param => {
-          if (param.seriesName.includes('体重')) {
-            result += `${param.marker}${param.seriesName}: ${param.value}g<br/>`
-          } else {
+          if (param.value !== null && param.value !== undefined) {
             result += `${param.marker}${param.seriesName}: ${param.value}<br/>`
           }
         })
         return result
       }
     },
-    legend: { data: ['身高(cm)', '体重(g)', '头围(cm)'], bottom: 0 },
+    legend: { data: legendData, bottom: 0 },
     grid: { left: '3%', right: '4%', bottom: '15%', top: '10%', containLabel: true },
-    xAxis: { 
-      type: 'category', 
-      data: dates,
-      axisLabel: { fontSize: 10 }
+    xAxis: {
+      type: 'category',
+      data: allDates,
+      axisLabel: { fontSize: 10 },
+      triggerEvent: true
     },
-    yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-    series: [
-      { 
-        name: '身高(cm)', 
-        type: 'line', 
-        data: records.map(r => r.height), 
-        smooth: true,
-        itemStyle: { color: '#ec4899' }
+    yAxis: [
+      {
+        type: 'value',
+        name: '身高(cm)',
+        position: 'left',
+        axisLabel: { fontSize: 10, color: '#ec4899' },
+        axisLine: { show: true, lineStyle: { color: '#ec4899' } },
+        splitLine: { show: false }
       },
-      { 
-        name: '体重(g)', 
-        type: 'line', 
-        data: records.map(r => r.weight),  // 以g为单位显示
-        smooth: true,
-        itemStyle: { color: '#22c55e' }
-      },
-      { 
-        name: '头围(cm)', 
-        type: 'line', 
-        data: records.map(r => r.head), 
-        smooth: true,
-        itemStyle: { color: '#f97316' }
+      {
+        type: 'value',
+        name: '体重(g)',
+        position: 'right',
+        axisLabel: { fontSize: 10, color: '#22c55e' },
+        axisLine: { show: true, lineStyle: { color: '#22c55e' } },
+        splitLine: { show: false }
       }
-    ]
+    ],
+    series: series.map((s, i) => ({
+      ...s,
+      yAxisIndex: i // 身高用左轴，体重用右轴
+    }))
   }
 })
 </script>
@@ -256,13 +334,6 @@ const chartOption = computed(() => {
   gap: 8px;
 }
 
-.chart-hint {
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-tertiary);
-  padding: 4px;
-}
-
 .chart-container {
   height: 220px;
   background: var(--bg);
@@ -297,36 +368,69 @@ const chartOption = computed(() => {
 .history-list {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.date-group {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
 
-.history-item {
+.date-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 4px 0;
+}
+
+.metrics-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.metric-item {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 12px;
   background: var(--bg);
   border-radius: var(--radius);
-  font-size: 13px;
+  border: 1px solid var(--border);
+  transition: all var(--transition-fast);
 }
 
-.history-item.selected {
-  border: 2px solid var(--primary);
-  background: linear-gradient(135deg, rgba(236, 72, 153, 0.05), rgba(236, 72, 153, 0.1));
+.metric-item:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-sm);
 }
 
-.history-date {
-  font-weight: 500;
-  color: var(--text);
-  min-width: 80px;
-}
-
-.history-data {
-  flex: 1;
+.metric-icon {
+  font-size: 20px;
+  width: 32px;
+  height: 32px;
   display: flex;
-  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(236, 72, 153, 0.1), rgba(236, 72, 153, 0.05));
+  border-radius: var(--radius-sm);
+}
+
+.metric-info {
+  flex: 1;
+}
+
+.metric-label {
+  font-size: 13px;
   color: var(--text-secondary);
-  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.metric-value {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .delete-btn {
@@ -352,5 +456,15 @@ const chartOption = computed(() => {
 .delete-btn svg {
   width: 16px;
   height: 16px;
+}
+
+.empty-history {
+  text-align: center;
+  padding: 16px;
+}
+
+.empty-hint {
+  font-size: 13px;
+  color: var(--text-tertiary);
 }
 </style>

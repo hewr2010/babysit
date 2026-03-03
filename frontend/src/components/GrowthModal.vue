@@ -1,31 +1,45 @@
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="modalStore.growth" class="modal-overlay" @click.self="modalStore.growth = false">
+      <div v-if="modalStore.growth" class="modal-overlay" @click.self="close">
         <div class="modal-sheet">
           <div class="modal-header">
-            <h3>记录生长数据</h3>
-            <button class="close-btn" @click="modalStore.growth = false">✕</button>
+            <h3>{{ modalTitle }}</h3>
+            <button class="close-btn" @click="close">✕</button>
           </div>
           <form @submit.prevent="handleSubmit">
             <div class="form-group">
               <label>日期 <span class="required">*</span></label>
               <input v-model="form.date" type="date" required />
             </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label>身高 (cm) <span class="required">*</span></label>
-                <input v-model="form.height" type="number" step="0.1" placeholder="52.5" required />
-              </div>
-              <div class="form-group">
-                <label>体重 (g) <span class="required">*</span></label>
-                <input v-model="form.weight" type="number" step="1" min="0" placeholder="3500" required />
-              </div>
+            
+            <!-- 身高输入 -->
+            <div v-if="modalStore.growthType === 'height'" class="form-group">
+              <label>身高 (cm) <span class="required">*</span></label>
+              <input 
+                ref="inputRef"
+                v-model="form.value" 
+                type="number" 
+                step="0.1" 
+                placeholder="例如: 52.5"
+                required
+              />
             </div>
-            <div class="form-group">
-              <label>头围 (cm) <span class="required">*</span></label>
-              <input v-model="form.head" type="number" step="0.1" placeholder="36.0" required />
+            
+            <!-- 体重输入 -->
+            <div v-if="modalStore.growthType === 'weight'" class="form-group">
+              <label>体重 (g) <span class="required">*</span></label>
+              <input 
+                ref="inputRef"
+                v-model="form.value" 
+                type="number" 
+                step="1"
+                min="0"
+                placeholder="例如: 3500"
+                required
+              />
             </div>
+            
             <button type="submit" class="submit-btn">保存</button>
           </form>
         </div>
@@ -35,53 +49,58 @@
 </template>
 
 <script setup>
-import { reactive, watch } from 'vue'
+import { reactive, watch, ref, nextTick, computed } from 'vue'
 import dayjs from 'dayjs'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 
 const store = useAppStore()
 const modalStore = useModalStore()
+const inputRef = ref(null)
 
 const form = reactive({
   date: dayjs().format('YYYY-MM-DD'),
-  height: '',
-  weight: '',
-  head: ''
+  value: ''
+})
+
+const modalTitle = computed(() => {
+  return modalStore.growthType === 'height' ? '记录身高' : '记录体重'
 })
 
 watch(() => modalStore.growth, (val) => {
   if (val) {
     form.date = dayjs().format('YYYY-MM-DD')
+    form.value = ''
     
-    // 预填充上一次的数据
-    const lastRecord = store.growthRecords[0]
-    if (lastRecord) {
-      form.height = lastRecord.height
-      form.weight = lastRecord.weight
-      form.head = lastRecord.head
-    } else {
-      form.height = ''
-      form.weight = ''
-      form.head = ''
-    }
+    // 自动聚焦输入框
+    nextTick(() => {
+      if (inputRef.value) {
+        inputRef.value.focus()
+      }
+    })
   }
 })
 
+function close() {
+  modalStore.growth = false
+}
+
 function handleSubmit() {
-  // 验证所有字段都有值
-  if (!form.height || !form.weight || !form.head) {
-    alert('请填写所有生长数据')
+  if (!form.value) {
+    alert('请输入数值')
     return
   }
   
-  store.addGrowth({
-    date: form.date,
-    height: parseFloat(form.height),
-    weight: parseInt(form.weight),  // 体重为整数g
-    head: parseFloat(form.head)
-  })
-  modalStore.growth = false
+  const data = { date: form.date }
+  
+  if (modalStore.growthType === 'height') {
+    data.height = parseFloat(form.value)
+  } else if (modalStore.growthType === 'weight') {
+    data.weight = parseInt(form.value)
+  }
+  
+  store.addGrowth(data)
+  close()
 }
 </script>
 
@@ -151,12 +170,6 @@ function handleSubmit() {
 .form-group input:focus {
   border-color: var(--primary);
   outline: none;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
 }
 
 .submit-btn {

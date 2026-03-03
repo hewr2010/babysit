@@ -6,6 +6,7 @@ export const useModalStore = defineStore('modal', () => {
   const recordType = ref('feeding')
   const baby = ref(false)
   const growth = ref(false)
+  const growthType = ref('height') // 'height' 或 'weight'
   const recordDetail = ref(false)
   const recordDetailData = ref(null)
   const photoViewer = ref(false)
@@ -34,6 +35,11 @@ export const useModalStore = defineStore('modal', () => {
     dayPhotos.value = true
   }
   
+  function openGrowth(type) {
+    growthType.value = type
+    growth.value = true
+  }
+  
   return {
     record,
     recordType,
@@ -46,9 +52,11 @@ export const useModalStore = defineStore('modal', () => {
     allPhotos,
     dayPhotos,
     dayPhotosData,
+    growthType,
     openRecord,
     openRecordDetail,
     openPhotoViewer,
-    openDayPhotos
+    openDayPhotos,
+    openGrowth
   }
 })

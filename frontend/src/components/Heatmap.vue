@@ -4,8 +4,8 @@
       <h2 class="section-title">本月记录</h2>
       <div class="legend">
         <span class="legend-item">🍼 喂奶</span>
-        <span class="legend-item">😴 睡眠</span>
-        <span class="legend-item">🩲 尿布</span>
+        <span class="legend-item">💩 大便</span>
+        <span class="legend-item">💧 小便</span>
       </div>
     </div>
     <div class="heatmap-container">
@@ -63,8 +63,8 @@ function handleCellClick(day, hour) {
 function getTypeIcon(type) {
   const icons = {
     feeding: '🍼',
-    sleep: '😴',
-    diaper: '🩲',
+    poop: '💩',
+    pee: '💧',
   }
   return icons[type] || ''
 }
@@ -107,7 +107,9 @@ function getTypeIcon(type) {
 }
 
 .heatmap-container {
+  overflow-x: auto;
   overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
 }
 
 .heatmap {

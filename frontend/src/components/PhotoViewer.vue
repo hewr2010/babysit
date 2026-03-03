@@ -83,15 +83,7 @@ const isSupportedVideoFormat = computed(() => {
   const filename = currentPhoto.value.name.toLowerCase()
   
   // 浏览器通常支持的格式
-  const supportedFormats = ['.mp4', '.webm', '.ogg', '.mov']
-  
-  // 不支持的格式（Live Photo等特殊格式）
-  const unsupportedFormats = ['.livp']
-  
-  // 检查是否是明确不支持的格式
-  if (unsupportedFormats.some(ext => filename.endsWith(ext))) {
-    return false
-  }
+  const supportedFormats = ['.mp4', '.webm', '.ogg', '.mov', '.livp']
   
   // 检查是否是支持的格式
   return supportedFormats.some(ext => filename.endsWith(ext))
@@ -118,8 +110,14 @@ async function loadPhoto() {
     previewUrl.value = `/preview/${encodeURIComponent(currentPhoto.value.name)}`
   } else if (currentPhoto.value.type === 'video') {
     if (isSupportedVideoFormat.value) {
-      // 支持的视频格式：使用后端代理
-      videoUrl.value = `/download/${encodeURIComponent(currentPhoto.value.name)}`
+      const filename = currentPhoto.value.name
+      // .livp 文件使用特殊接口提取视频
+      if (filename.toLowerCase().endsWith('.livp')) {
+        videoUrl.value = `/livp/${encodeURIComponent(filename)}`
+      } else {
+        // 其他支持的视频格式：使用后端代理
+        videoUrl.value = `/download/${encodeURIComponent(filename)}`
+      }
       loading.value = false
     } else {
       // 不支持的视频格式：显示缩略图

@@ -5,6 +5,7 @@
       <div class="summary-card" v-for="(item, i) in summaryItems" :key="i" :class="`stagger-${i+1}`">
         <div class="card-icon">{{ item.icon }}</div>
         <div class="card-value">{{ item.value }}</div>
+        <div v-if="item.subValue" class="card-sub-value">{{ item.subValue }}</div>
         <div class="card-label">{{ item.label }}</div>
       </div>
     </div>
@@ -18,9 +19,14 @@ import { useAppStore } from '../stores/app'
 const store = useAppStore()
 
 const summaryItems = computed(() => [
-  { icon: '😴', value: store.yesterdaySummary.sleep || '-', label: '睡眠时长' },
-  { icon: '🍼', value: store.yesterdaySummary.feeding_count || '-', label: '喂奶次数' },
-  { icon: '🩲', value: store.yesterdaySummary.diaper_count || '-', label: '换尿布' }
+  { 
+    icon: '🍼', 
+    value: store.yesterdaySummary.feeding_count || '-', 
+    subValue: store.yesterdaySummary.feeding_total > 0 ? `${store.yesterdaySummary.feeding_total}ml` : null,
+    label: '喂奶' 
+  },
+  { icon: '💩', value: store.yesterdaySummary.poop_count || '-', label: '大便' },
+  { icon: '💧', value: store.yesterdaySummary.pee_count || '-', label: '小便' }
 ])
 </script>
 
@@ -74,5 +80,13 @@ const summaryItems = computed(() => [
 .card-label {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.card-sub-value {
+  font-size: 11px;
+  color: var(--primary);
+  margin-top: -2px;
+  margin-bottom: 4px;
+  font-weight: 500;
 }
 </style>

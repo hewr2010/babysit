@@ -17,7 +17,7 @@ from PIL import Image
 from .config import DATA_DIR
 from .db import (init_db, close_db, get_baby, get_records_by_month, add_baby, 
                    add_record, delete_record, get_growth_records, add_growth, delete_growth, get_yesterday_summary)
-from .baidu import get_baidu_files, get_download_url, get_thumbnail_data
+from .baidu import get_baidu_files, get_download_url, get_thumbnail_data, extract_livp_video
 from .utils import calculate_age, format_month_data
 
 # Vue3 frontend dist directory
@@ -216,6 +216,20 @@ def create_app():
         if error:
             return jsonify({"error": error}), 500
         return jsonify({"url": url})
+    
+    @app.route("/livp/<path:filename>")
+    def livp_video(filename):
+        """从 .livp 文件中提取视频部分并返回"""
+        try:
+            filename = unquote(filename)
+        except:
+            pass
+        
+        video_data = extract_livp_video(filename)
+        if video_data:
+            return send_file(video_data, mimetype='video/quicktime')
+        
+        return jsonify({"error": "无法提取视频"}), 500
     
     return app
 
