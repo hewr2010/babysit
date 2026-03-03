@@ -233,17 +233,9 @@ def create_app():
     
     return app
 
+app = create_app()
+
 if __name__ == "__main__":
-    print("=" * 50)
-    print("babysit - 宝宝成长管家")
-    print("=" * 50)
-    print(f"✓ 数据目录: {DATA_DIR}")
-    print("=" * 50)
-    print("启动: http://localhost:8080")
-    print("=" * 50)
-    
-    app = create_app()
-    
     with app.app_context():
         baby = get_baby()
         if baby:
