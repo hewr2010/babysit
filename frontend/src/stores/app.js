@@ -9,8 +9,11 @@ export const useAppStore = defineStore('app', () => {
   const baby = ref(null)
   const currentYear = ref(dayjs().year())
   const currentMonth = ref(dayjs().month() + 1)
+  const heatmapData = ref({})
+  const records = ref([])
   const photos = ref([])
   const growthRecords = ref([])
+  const yesterdaySummary = ref({})
   const loading = ref(false)
   
   // Getters
@@ -46,6 +49,10 @@ export const useAppStore = defineStore('app', () => {
     return `${currentYear.value}年${currentMonth.value}月`
   })
   
+  const daysInMonth = computed(() => {
+    return dayjs(`${currentYear.value}-${currentMonth.value}`).daysInMonth()
+  })
+  
   // Actions
   async function fetchBaby() {
     const res = await fetch(`${API_BASE}/baby`)
@@ -59,6 +66,31 @@ export const useAppStore = defineStore('app', () => {
       body: JSON.stringify(data)
     })
     await fetchBaby()
+  }
+  
+  async function fetchMonthData() {
+    loading.value = true
+    const res = await fetch(`${API_BASE}/records/${currentYear.value}/${currentMonth.value}`)
+    const data = await res.json()
+    heatmapData.value = data.heatmap || {}
+    records.value = data.records || []
+    loading.value = false
+  }
+  
+  async function addRecord(data) {
+    await fetch(`${API_BASE}/records`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    })
+    await fetchMonthData()
+    await fetchYesterdaySummary()
+  }
+  
+  async function deleteRecord(id) {
+    await fetch(`${API_BASE}/records/${id}`, { method: 'DELETE' })
+    await fetchMonthData()
+    await fetchYesterdaySummary()
   }
   
   const photosByDate = ref({})
@@ -100,6 +132,11 @@ export const useAppStore = defineStore('app', () => {
     await fetchGrowth()
   }
   
+  async function fetchYesterdaySummary() {
+    const res = await fetch(`${API_BASE}/summary/yesterday`)
+    yesterdaySummary.value = await res.json()
+  }
+  
   function changeMonth(delta) {
     let newMonth = currentMonth.value + delta
     let newYear = currentYear.value
@@ -118,6 +155,7 @@ export const useAppStore = defineStore('app', () => {
     // 同步URL参数
     updateURL()
     
+    fetchMonthData()
     fetchPhotos()
   }
   
@@ -125,6 +163,7 @@ export const useAppStore = defineStore('app', () => {
     currentYear.value = year
     currentMonth.value = month
     updateURL()
+    fetchMonthData()
     fetchPhotos()
   }
   
@@ -159,8 +198,10 @@ export const useAppStore = defineStore('app', () => {
     loadFromURL()  // 先加载URL参数
     await fetchBaby()
     await Promise.all([
+      fetchMonthData(),
       fetchPhotos(),
-      fetchGrowth()
+      fetchGrowth(),
+      fetchYesterdaySummary()
     ])
     updateURL()  // 更新URL保证一致
   }
@@ -173,21 +214,29 @@ export const useAppStore = defineStore('app', () => {
     baby,
     currentYear,
     currentMonth,
+    heatmapData,
+    records,
     photos,
     photosByDate,
     growthRecords,
+    yesterdaySummary,
     loading,
     babyAge,
     babyAgeDisplay,
     monthDisplay,
+    daysInMonth,
     latestGrowthRecord,
     fetchBaby,
     saveBaby,
+    fetchMonthData,
+    addRecord,
+    deleteRecord,
     fetchPhotos,
     refreshPhotos,
     fetchGrowth,
     addGrowth,
     deleteGrowth,
+    fetchYesterdaySummary,
     changeMonth,
     setMonth,
     init

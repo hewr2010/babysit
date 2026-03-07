@@ -20,25 +20,10 @@
         </div>
         <div class="photo-grid">
           <div v-for="photo in photos.slice(0, 6)" :key="photo.name" 
-               class="photo-item" 
-               :class="{ 
-                 video: photo.type === 'video',
-                 'is-processing': !isReady(photo),
-                 'is-error': isError(photo)
-               }"
+               class="photo-item" :class="{ video: photo.type === 'video' }"
                @click="openPhoto(date, photo)">
             <img :src="`/thumb/${encodeURIComponent(photo.name)}`" loading="lazy" />
             <span v-if="photo.time" class="photo-time">{{ photo.time }}</span>
-            <!-- 处理中遮罩 -->
-            <div v-if="!isReady(photo)" class="processing-overlay">
-              <span class="processing-spinner"></span>
-              <span class="processing-text">处理中</span>
-            </div>
-            <!-- 错误提示 -->
-            <div v-if="isError(photo)" class="error-overlay">
-              <span class="error-icon">⚠️</span>
-              <span class="error-text">处理失败</span>
-            </div>
           </div>
         </div>
         <button v-if="photos.length > 6" class="view-more-btn" @click="viewMorePhotos(date, photos)">
@@ -50,125 +35,53 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch, onUnmounted } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 
 const store = useAppStore()
 const modalStore = useModalStore()
 
-// 本地状态管理 - 不使用 provide/inject
-const processingStatus = ref(new Map())
-const queriedPhotos = ref(new Set())
-let eventSource = null
+// 每小时自动刷新
 let refreshInterval = null
 
-// 建立 SSE 连接
-function connectSSE() {
-  if (eventSource) {
-    eventSource.close()
-  }
-  
-  eventSource = new EventSource('/api/media/events')
-  
-  eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data)
-      if (data.type === 'heartbeat' || data.type === 'connected') return
-      
-      if (data.filename && data.status) {
-        const current = processingStatus.value.get(data.filename) || {}
-        processingStatus.value.set(data.filename, { ...current, ...data.status })
-        processingStatus.value = new Map(processingStatus.value)
-      }
-    } catch (e) {
-      console.error('SSE parse error:', e)
-    }
-  }
-  
-  eventSource.onerror = () => {
-    setTimeout(connectSSE, 3000)
-  }
-}
-
 onMounted(() => {
+  // 立即刷新一次
   store.refreshPhotos()
-  connectSSE()
-  
+  // 每小时自动刷新
   refreshInterval = setInterval(() => {
     store.refreshPhotos()
-  }, 60 * 60 * 1000)
+  }, 60 * 60 * 1000) // 1小时
 })
 
 onUnmounted(() => {
-  if (refreshInterval) clearInterval(refreshInterval)
-  if (eventSource) eventSource.close()
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+  }
 })
 
-// 监听照片变化
-watch(() => store.photos, (newPhotos) => {
-  const toQuery = newPhotos.filter(p => {
-    return !queriedPhotos.value.has(p.name) && !processingStatus.value.has(p.name)
-  })
-  if (toQuery.length > 0) {
-    queryPhotoStatus(toQuery.map(p => p.name))
-  }
-}, { deep: true })
-
-async function queryPhotoStatus(filenames) {
-  if (filenames.length === 0) return
-  
-  filenames.forEach(name => queriedPhotos.value.add(name))
-  const batch = filenames.slice(0, 20)
-  
-  await Promise.all(batch.map(async (filename) => {
-    try {
-      const res = await fetch(`/api/media/status/${encodeURIComponent(filename)}`)
-      if (res.ok) {
-        const status = await res.json()
-        processingStatus.value.set(filename, status)
-      }
-    } catch (e) {
-      console.error('Query status failed:', e)
-    }
-  }))
-  
-  processingStatus.value = new Map(processingStatus.value)
-}
-
+// 按日期排序（最新的在前）
 const sortedPhotosByDate = computed(() => {
   const dates = Object.keys(store.photosByDate).sort().reverse()
   const result = {}
-  for (const date of dates) result[date] = store.photosByDate[date]
+  for (const date of dates) {
+    result[date] = store.photosByDate[date]
+  }
   return result
 })
 
 function formatDate(dateStr) {
   if (dateStr === '0000-00-00') return '无日期'
-  const [y, m, d] = dateStr.split('-')
-  return `${m}月${d}日`
-}
-
-function isReady(photo) {
-  const s = processingStatus.value.get(photo.name)
-  if (!s) return false
-  if (s.thumb_200 !== 'done' || s.thumb_800 !== 'done') return false
-  if (photo.type === 'video' && s.video !== 'done') return false
-  return true
-}
-
-function isError(photo) {
-  const s = processingStatus.value.get(photo.name)
-  if (!s) return false
-  if (s.thumb_200 === 'error' || s.thumb_800 === 'error') return true
-  if (photo.type === 'video' && s.video === 'error') return true
-  return false
+  const [year, month, day] = dateStr.split('-')
+  return `${month}月${day}日`
 }
 
 function openPhoto(date, photo) {
-  if (!isReady(photo)) return
+  // 找到该照片在所有照片中的索引
   const index = store.photos.findIndex(p => p.name === photo.name)
-  if (index !== -1) modalStore.openPhotoViewer(index)
+  if (index !== -1) {
+    modalStore.openPhotoViewer(index)
+  }
 }
 
 function viewMorePhotos(date, photos) {
@@ -177,7 +90,6 @@ function viewMorePhotos(date, photos) {
 
 async function handleRefresh() {
   await store.refreshPhotos()
-  queriedPhotos.value.clear()
 }
 </script>
 
@@ -323,13 +235,8 @@ async function handleRefresh() {
   transition: transform 0.3s;
 }
 
-.photo-item:hover:not(.is-processing):not(.is-error) img {
+.photo-item:hover img {
   transform: scale(1.05);
-}
-
-.photo-item.is-processing,
-.photo-item.is-error {
-  cursor: not-allowed;
 }
 
 .photo-item.video::after {
@@ -341,12 +248,6 @@ async function handleRefresh() {
   color: white;
   font-size: 16px;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-  z-index: 1;
-}
-
-.photo-item.is-processing.video::after,
-.photo-item.is-error.video::after {
-  display: none;
 }
 
 .photo-time {
@@ -362,48 +263,6 @@ async function handleRefresh() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  z-index: 1;
-}
-
-.processing-overlay,
-.error-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  z-index: 2;
-}
-
-.processing-spinner {
-  width: 20px;
-  height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spinner 0.8s linear infinite;
-}
-
-@keyframes spinner {
-  to { transform: rotate(360deg); }
-}
-
-.processing-text,
-.error-text {
-  font-size: 10px;
-  font-weight: 500;
-}
-
-.error-overlay {
-  background: rgba(0, 0, 0, 0.5);
-}
-
-.error-icon {
-  font-size: 16px;
 }
 
 .empty-state {

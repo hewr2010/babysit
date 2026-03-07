@@ -11,25 +11,10 @@
           <div class="photos-container">
             <div class="photos-grid">
               <div v-for="photo in paginatedPhotos" :key="photo.name"
-                   class="photo-item" 
-                   :class="{ 
-                     video: photo.type === 'video',
-                     'is-processing': !isReady(photo.name),
-                     'is-error': isError(photo.name)
-                   }"
+                   class="photo-item" :class="{ video: photo.type === 'video' }"
                    @click="openPhoto(photo)">
                 <img :src="`/thumb/${encodeURIComponent(photo.name)}`" loading="lazy" />
                 <span v-if="photo.time" class="photo-time">{{ photo.time }}</span>
-                <!-- 处理中遮罩 -->
-                <div v-if="!isReady(photo.name)" class="processing-overlay">
-                  <span class="processing-spinner"></span>
-                  <span class="processing-text">处理中</span>
-                </div>
-                <!-- 错误提示 -->
-                <div v-if="isError(photo.name)" class="error-overlay">
-                  <span class="error-icon">⚠️</span>
-                  <span class="error-text">处理失败</span>
-                </div>
               </div>
             </div>
           </div>
@@ -46,15 +31,12 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onUnmounted, inject } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 
 const store = useAppStore()
 const modalStore = useModalStore()
-
-// 从父组件注入 processingStatus
-const processingStatus = inject('processingStatus', ref(new Map()))
 
 const currentPage = ref(1)
 const PER_PAGE = 12
@@ -71,42 +53,8 @@ const paginatedPhotos = computed(() => {
 })
 
 watch(() => modalStore.dayPhotos, (val) => {
-  if (val) {
-    currentPage.value = 1
-    // 查询当前页照片的状态
-    queryCurrentPageStatus()
-  }
+  if (val) currentPage.value = 1
 })
-
-onUnmounted(() => {
-  // 清理工作由父组件处理
-})
-
-// 查询当前页照片状态
-async function queryCurrentPageStatus() {
-  const photos = paginatedPhotos.value
-  const needQuery = photos.filter(p => {
-    const status = processingStatus.value.get(p.name)
-    return !status || !isReady(p.name)
-  })
-  
-  if (needQuery.length === 0) return
-  
-  await Promise.all(needQuery.map(async (photo) => {
-    try {
-      const response = await fetch(`/api/media/status/${encodeURIComponent(photo.name)}`)
-      if (response.ok) {
-        const status = await response.json()
-        processingStatus.value.set(photo.name, status)
-      }
-    } catch (e) {
-      console.error('Failed to query status:', e)
-    }
-  }))
-  
-  // 触发响应式更新
-  processingStatus.value = new Map(processingStatus.value)
-}
 
 function formatDate(dateStr) {
   if (!dateStr) return ''
@@ -115,47 +63,7 @@ function formatDate(dateStr) {
   return `${year}年${month}月${day}日`
 }
 
-function isVideo(filename) {
-  return filename.toLowerCase().endsWith('.mp4') || 
-         filename.toLowerCase().endsWith('.mov') ||
-         filename.toLowerCase().endsWith('.livp')
-}
-
-// 检查文件是否完全 ready
-function isReady(filename) {
-  const status = processingStatus.value.get(filename)
-  if (!status) return false
-  
-  if (status.thumb_200 !== 'done' || status.thumb_800 !== 'done') {
-    return false
-  }
-  
-  if (isVideo(filename) && status.video !== 'done') {
-    return false
-  }
-  
-  return true
-}
-
-function isError(filename) {
-  const status = processingStatus.value.get(filename)
-  if (!status) return false
-  
-  if (status.thumb_200 === 'error' || status.thumb_800 === 'error') {
-    return true
-  }
-  if (isVideo(filename) && status.video === 'error') {
-    return true
-  }
-  return false
-}
-
 function openPhoto(photo) {
-  // 如果没 ready，不允许点击
-  if (!isReady(photo.name)) {
-    return
-  }
-  
   const index = store.photos.findIndex(p => p.name === photo.name)
   if (index !== -1) {
     modalStore.openPhotoViewer(index)
@@ -253,13 +161,8 @@ function openPhoto(photo) {
   transition: transform 0.2s;
 }
 
-.photo-item:hover:not(.is-processing):not(.is-error) img {
+.photo-item:hover img {
   transform: scale(1.05);
-}
-
-.photo-item.is-processing,
-.photo-item.is-error {
-  cursor: not-allowed;
 }
 
 .photo-item.video::after {
@@ -271,12 +174,6 @@ function openPhoto(photo) {
   color: white;
   font-size: 20px;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
-  z-index: 1;
-}
-
-.photo-item.is-processing.video::after,
-.photo-item.is-error.video::after {
-  display: none;
 }
 
 .photo-time {
@@ -289,48 +186,6 @@ function openPhoto(photo) {
   font-size: 11px;
   padding: 4px;
   text-align: center;
-  z-index: 1;
-}
-
-.processing-overlay,
-.error-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
-  z-index: 2;
-}
-
-.processing-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spinner 0.8s linear infinite;
-}
-
-@keyframes spinner {
-  to { transform: rotate(360deg); }
-}
-
-.processing-text,
-.error-text {
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.error-overlay {
-  background: rgba(0, 0, 0, 0.5);
-}
-
-.error-icon {
-  font-size: 20px;
 }
 
 .pagination {

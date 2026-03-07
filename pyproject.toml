@@ -24,3 +24,4 @@ packages = ["babysit"]
 
 [tool.hatch.build.force-include]
 "babysit/templates" = "babysit/templates"
+"babysit/data" = "babysit/data"

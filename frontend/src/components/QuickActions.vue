@@ -1,5 +1,12 @@
 <template>
   <div class="quick-actions">
+    <button v-for="action in actions" :key="action.type" 
+            class="action-btn" 
+            :class="action.type"
+            @click="modalStore.openRecord(action.type)">
+      <span class="action-icon">{{ action.icon }}</span>
+      <span class="action-label">{{ action.label }}</span>
+    </button>
     <button class="action-btn height-btn" @click="modalStore.openGrowth('height')">
       <span class="action-icon">📏</span>
       <span class="action-label">身高</span>
@@ -15,6 +22,12 @@
 import { useModalStore } from '../stores/modal'
 
 const modalStore = useModalStore()
+
+const actions = [
+  { type: 'feeding', icon: '🍼', label: '喂奶' },
+  { type: 'poop', icon: '💩', label: '大便' },
+  { type: 'pee', icon: '💧', label: '小便' },
+]
 </script>
 
 <style scoped>
@@ -61,8 +74,10 @@ const modalStore = useModalStore()
   transform: scale(0.95);
 }
 
-.action-btn.height-btn:hover { border-color: var(--height); }
-.action-btn.weight-btn:hover { border-color: var(--weight); }
+.action-btn.feeding:hover { border-color: var(--feeding); }
+.action-btn.sleep:hover { border-color: var(--sleep); }
+.action-btn.diaper:hover { border-color: var(--diaper); }
+.action-btn.food:hover { border-color: var(--food); }
 
 .action-icon {
   font-size: 24px;

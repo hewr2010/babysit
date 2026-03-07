@@ -6,9 +6,7 @@ babysit - 宝宝成长管家 (Vue3版)
 """
 
 import io
-import json
 import os
-import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote
@@ -17,11 +15,10 @@ from flask import Flask, render_template, jsonify, request, send_file, send_from
 from PIL import Image
 
 from .config import DATA_DIR
-from .db import init_db, close_db, get_baby, add_baby, get_growth_records, add_growth, delete_growth
-from .baidu import (get_baidu_files, get_download_url, get_thumbnail_data, 
-                    extract_livp_video, prefetch_thumbnails, get_processing_status,
-                    register_sse_client, unregister_sse_client)
-from .utils import calculate_age
+from .db import (init_db, close_db, get_baby, get_records_by_month, add_baby, 
+                   add_record, delete_record, get_growth_records, add_growth, delete_growth, get_yesterday_summary)
+from .baidu import get_baidu_files, get_download_url, get_thumbnail_data, extract_livp_video
+from .utils import calculate_age, format_month_data
 
 # Vue3 frontend dist directory
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
@@ -103,6 +100,36 @@ def create_app():
             return jsonify({"message": "保存成功"})
         return jsonify(get_baby() or {})
     
+    # ===== 月度记录（热力图用） =====
+    @app.route("/api/records/<int:year>/<int:month>")
+    def api_records_month(year, month):
+        """获取某月所有记录，用于热力图"""
+        records = get_records_by_month(year, month)
+        data = format_month_data(records, year, month)
+        return jsonify({
+            "records": records,
+            "heatmap": data,
+            "total_days": 30
+        })
+    
+    @app.route("/api/records", methods=["POST"])
+    def api_add_record():
+        """添加记录"""
+        add_record(request.json)
+        return jsonify({"message": "记录成功"})
+    
+    @app.route("/api/records/<int:id>", methods=["DELETE"])
+    def api_delete_record(id):
+        """删除记录"""
+        delete_record(id)
+        return jsonify({"message": "删除成功"})
+    
+    # ===== 昨日总结 =====
+    @app.route("/api/summary/yesterday")
+    def api_yesterday_summary():
+        """获取昨日总结"""
+        return jsonify(get_yesterday_summary())
+    
     # ===== 生长记录 =====
     @app.route("/api/growth", methods=["GET", "POST"])
     def api_growth():
@@ -128,8 +155,6 @@ def create_app():
     def api_album_refresh():
         """刷新相册缓存（会重新应用EXIF时间）"""
         files = get_baidu_files(force_refresh=True)
-        # 后台预生成缩略图，不阻塞响应
-        prefetch_thumbnails_async(files)
         return jsonify({"count": sum(len(v) for v in files.values())})
     
     @app.route("/api/album/<int:year>/<int:month>")
@@ -142,53 +167,6 @@ def create_app():
             if date_str.startswith(prefix):
                 result[date_str] = files
         return jsonify(result)
-    
-    @app.route("/api/media/status/<path:filename>")
-    def api_media_status(filename):
-        """获取媒体文件处理状态"""
-        try:
-            filename = unquote(filename)
-        except:
-            pass
-        
-        status = get_processing_status(filename)
-        return jsonify(status)
-    
-    @app.route("/api/media/events")
-    def api_media_events():
-        """SSE 端点：实时推送媒体处理状态更新"""
-        from flask import Response, stream_with_context
-        import queue
-        
-        @stream_with_context
-        def event_stream():
-            client_queue = register_sse_client()
-            try:
-                # 发送初始连接成功消息
-                yield f"data: {json.dumps({'type': 'connected', 'time': time.time()})}\n\n"
-                
-                while True:
-                    try:
-                        # 等待消息，最多 30 秒（保持连接活跃）
-                        message = client_queue.get(timeout=30)
-                        yield f"data: {json.dumps(message)}\n\n"
-                    except queue.Empty:
-                        # 发送心跳保持连接
-                        yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-            except GeneratorExit:
-                # 客户端断开连接
-                pass
-            finally:
-                unregister_sse_client(client_queue)
-        
-        return Response(
-            event_stream(),
-            mimetype='text/event-stream',
-            headers={
-                'Cache-Control': 'no-cache',
-                'X-Accel-Buffering': 'no'  # 禁用 Nginx 缓冲
-            }
-        )
     
     @app.route("/thumb/<path:filename>")
     def thumbnail(filename):
@@ -254,21 +232,6 @@ def create_app():
         return jsonify({"error": "无法提取视频"}), 500
     
     return app
-
-
-def prefetch_thumbnails_async(files_by_date):
-    """后台异步预生成缩略图"""
-    import threading
-    
-    def prefetch():
-        try:
-            prefetch_thumbnails(files_by_date)
-        except Exception as e:
-            print(f"Prefetch error: {e}")
-    
-    thread = threading.Thread(target=prefetch, daemon=True)
-    thread.start()
-
 
 if __name__ == "__main__":
     app = create_app()
