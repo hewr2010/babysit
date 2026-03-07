@@ -3,17 +3,12 @@
     <div class="app-container">
       <Header />
       <main class="main-content">
-        <SummaryCards />
-        <Heatmap />
         <GrowthSection />
         <PhotoSection />
       </main>
     </div>
-    <QuickActions />
-    <RecordModal />
     <BabyModal />
     <GrowthModal />
-    <RecordDetailModal />
     <PhotoViewer />
     <AllPhotosModal />
     <DayPhotosModal />
@@ -24,15 +19,10 @@
 import { onMounted } from 'vue'
 import { useAppStore } from './stores/app'
 import Header from './components/Header.vue'
-import SummaryCards from './components/SummaryCards.vue'
-import Heatmap from './components/Heatmap.vue'
 import GrowthSection from './components/GrowthSection.vue'
 import PhotoSection from './components/PhotoSection.vue'
-import QuickActions from './components/QuickActions.vue'
-import RecordModal from './components/RecordModal.vue'
 import BabyModal from './components/BabyModal.vue'
 import GrowthModal from './components/GrowthModal.vue'
-import RecordDetailModal from './components/RecordDetailModal.vue'
 import PhotoViewer from './components/PhotoViewer.vue'
 import AllPhotosModal from './components/AllPhotosModal.vue'
 import DayPhotosModal from './components/DayPhotosModal.vue'
@@ -56,7 +46,7 @@ onMounted(() => {
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
-  padding-bottom: 100px;
+  padding-bottom: 20px;
 }
 
 .main-content {

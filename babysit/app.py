@@ -15,10 +15,10 @@ from flask import Flask, render_template, jsonify, request, send_file, send_from
 from PIL import Image
 
 from .config import DATA_DIR
-from .db import (init_db, close_db, get_baby, get_records_by_month, add_baby, 
-                   add_record, delete_record, get_growth_records, add_growth, delete_growth, get_yesterday_summary)
+from .db import (init_db, close_db, get_baby, add_baby, 
+                   get_growth_records, add_growth, delete_growth)
 from .baidu import get_baidu_files, get_download_url, get_thumbnail_data, extract_livp_video
-from .utils import calculate_age, format_month_data
+from .utils import calculate_age
 
 # Vue3 frontend dist directory
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
@@ -99,36 +99,6 @@ def create_app():
             add_baby(request.json)
             return jsonify({"message": "保存成功"})
         return jsonify(get_baby() or {})
-    
-    # ===== 月度记录（热力图用） =====
-    @app.route("/api/records/<int:year>/<int:month>")
-    def api_records_month(year, month):
-        """获取某月所有记录，用于热力图"""
-        records = get_records_by_month(year, month)
-        data = format_month_data(records, year, month)
-        return jsonify({
-            "records": records,
-            "heatmap": data,
-            "total_days": 30
-        })
-    
-    @app.route("/api/records", methods=["POST"])
-    def api_add_record():
-        """添加记录"""
-        add_record(request.json)
-        return jsonify({"message": "记录成功"})
-    
-    @app.route("/api/records/<int:id>", methods=["DELETE"])
-    def api_delete_record(id):
-        """删除记录"""
-        delete_record(id)
-        return jsonify({"message": "删除成功"})
-    
-    # ===== 昨日总结 =====
-    @app.route("/api/summary/yesterday")
-    def api_yesterday_summary():
-        """获取昨日总结"""
-        return jsonify(get_yesterday_summary())
     
     # ===== 生长记录 =====
     @app.route("/api/growth", methods=["GET", "POST"])
