@@ -3,17 +3,13 @@
     <div class="app-container">
       <Header />
       <main class="main-content">
-        <SummaryCards />
-        <Heatmap />
         <GrowthSection />
         <PhotoSection />
       </main>
     </div>
     <QuickActions />
-    <RecordModal />
     <BabyModal />
     <GrowthModal />
-    <RecordDetailModal />
     <PhotoViewer />
     <AllPhotosModal />
     <DayPhotosModal />
@@ -21,26 +17,79 @@
 </template>
 
 <script setup>
-import { onMounted } from 'vue'
+import { onMounted, ref, provide, onUnmounted } from 'vue'
 import { useAppStore } from './stores/app'
 import Header from './components/Header.vue'
-import SummaryCards from './components/SummaryCards.vue'
-import Heatmap from './components/Heatmap.vue'
 import GrowthSection from './components/GrowthSection.vue'
 import PhotoSection from './components/PhotoSection.vue'
 import QuickActions from './components/QuickActions.vue'
-import RecordModal from './components/RecordModal.vue'
 import BabyModal from './components/BabyModal.vue'
 import GrowthModal from './components/GrowthModal.vue'
-import RecordDetailModal from './components/RecordDetailModal.vue'
 import PhotoViewer from './components/PhotoViewer.vue'
 import AllPhotosModal from './components/AllPhotosModal.vue'
 import DayPhotosModal from './components/DayPhotosModal.vue'
 
 const store = useAppStore()
 
+// 全局处理状态，通过 provide/inject 共享
+const processingStatus = ref(new Map())
+provide('processingStatus', processingStatus)
+
+// 全局 SSE 连接
+const eventSource = ref(null)
+
+function connectSSE() {
+  if (eventSource.value) {
+    eventSource.value.close()
+  }
+  
+  eventSource.value = new EventSource('/api/media/events')
+  
+  eventSource.value.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      
+      // 忽略心跳消息
+      if (data.type === 'heartbeat' || data.type === 'connected') {
+        return
+      }
+      
+      // 处理状态更新消息
+      if (data.filename && data.status) {
+        const currentStatus = processingStatus.value.get(data.filename) || {}
+        const newStatus = { ...currentStatus, ...data.status }
+        processingStatus.value.set(data.filename, newStatus)
+        // 触发响应式更新
+        processingStatus.value = new Map(processingStatus.value)
+      }
+    } catch (e) {
+      console.error('Failed to parse SSE message:', e)
+    }
+  }
+  
+  eventSource.value.onerror = (error) => {
+    console.error('SSE connection error:', error)
+    // 3秒后尝试重连
+    setTimeout(() => {
+      if (eventSource.value) {
+        connectSSE()
+      }
+    }, 3000)
+  }
+}
+
 onMounted(() => {
   store.init()
+  // 建立 SSE 连接
+  connectSSE()
+})
+
+onUnmounted(() => {
+  // 关闭 SSE 连接
+  if (eventSource.value) {
+    eventSource.value.close()
+    eventSource.value = null
+  }
 })
 </script>
 
