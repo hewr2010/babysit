@@ -13,7 +13,7 @@
             <span>加载中...</span>
           </div>
           
-          <!-- 显示中等质量预览图 -->
+          <!-- 显示中等质量预览图（已预生成） -->
           <img v-if="currentPhoto?.type === 'photo'" 
                :src="previewUrl" 
                @load="loading = false"
@@ -37,7 +37,7 @@
           </div>
         </div>
         
-        <!-- 底部操作栏 -->
+        <!-- 底部信息栏 -->
         <div class="viewer-actions">
           <div class="photo-info">
             <div class="photo-index">{{ currentIndex + 1 }} / {{ store.photos.length }}</div>
@@ -46,12 +46,6 @@
               <span v-if="currentPhoto?.time">🕒 {{ currentPhoto.time }}</span>
             </div>
           </div>
-          <a v-if="originalUrl" 
-             :href="originalUrl" 
-             target="_blank" 
-             class="download-btn">
-            查看原图
-          </a>
         </div>
       </div>
     </Transition>
@@ -69,7 +63,6 @@ const modalStore = useModalStore()
 const loading = ref(true)
 const previewUrl = ref('')
 const videoUrl = ref('')
-const originalUrl = ref('')
 
 const currentIndex = computed(() => modalStore.photoViewerIndex)
 const currentPhoto = computed(() => store.photos[currentIndex.value])
@@ -82,10 +75,9 @@ const isSupportedVideoFormat = computed(() => {
   
   const filename = currentPhoto.value.name.toLowerCase()
   
-  // 浏览器通常支持的格式
+  // 浏览器通常支持的格式（包括预提取的 .mov 文件）
   const supportedFormats = ['.mp4', '.webm', '.ogg', '.mov', '.livp']
   
-  // 检查是否是支持的格式
   return supportedFormats.some(ext => filename.endsWith(ext))
 })
 
@@ -103,20 +95,20 @@ async function loadPhoto() {
   loading.value = true
   previewUrl.value = ''
   videoUrl.value = ''
-  originalUrl.value = ''
   
   if (currentPhoto.value.type === 'photo') {
-    // 直接显示中等质量预览图
+    // 直接显示中等质量预览图（已预生成）
     previewUrl.value = `/preview/${encodeURIComponent(currentPhoto.value.name)}`
   } else if (currentPhoto.value.type === 'video') {
     if (isSupportedVideoFormat.value) {
       const filename = currentPhoto.value.name
-      // .livp 文件使用特殊接口提取视频
+      // .livp 文件使用已预提取的视频
       if (filename.toLowerCase().endsWith('.livp')) {
         videoUrl.value = `/livp/${encodeURIComponent(filename)}`
       } else {
-        // 其他支持的视频格式：使用后端代理
-        videoUrl.value = `/download/${encodeURIComponent(filename)}`
+        // 其他视频格式：不支持直接播放，因为没有预处理
+        // 这里应该不会出现，因为 refresh_media 会预处理所有视频
+        previewUrl.value = `/preview/${encodeURIComponent(filename)}`
       }
       loading.value = false
     } else {
@@ -124,9 +116,6 @@ async function loadPhoto() {
       previewUrl.value = `/preview/${encodeURIComponent(currentPhoto.value.name)}`
     }
   }
-  
-  // 原图URL使用后端代理（避免浏览器直接访问百度PCS被拒绝）
-  originalUrl.value = `/download/${encodeURIComponent(currentPhoto.value.name)}`
 }
 
 // 监听查看器打开
@@ -143,7 +132,6 @@ function close() {
   modalStore.photoViewer = false
   previewUrl.value = ''
   videoUrl.value = ''
-  originalUrl.value = ''
 }
 
 function prev() {
@@ -324,24 +312,6 @@ function next() {
   background: rgba(255, 255, 255, 0.1);
   padding: 6px 16px;
   border-radius: 20px;
-}
-
-.download-btn {
-  padding: 10px 24px;
-  background: var(--primary);
-  color: white;
-  border: none;
-  border-radius: 20px;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-decoration: none;
-  display: inline-block;
-}
-
-.download-btn:hover {
-  background: var(--primary-dark);
-  transform: translateY(-1px);
 }
 
 .fade-enter-active,

@@ -2,15 +2,16 @@
   <section class="photo-section animate-fadeInUp stagger-4">
     <div class="section-header">
       <h2 class="section-title">{{ store.monthDisplay }}照片 ({{ store.photos.length }}张)</h2>
-      <button class="refresh-btn" @click="handleRefresh" :disabled="store.loading" title="每小时自动刷新，也可手动点击">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: store.loading }">
+      <span v-if="store.loading" class="loading-indicator">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinning">
           <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
         </svg>
-      </button>
+      </span>
     </div>
     <div v-if="store.photos.length === 0" class="empty-state">
       <span class="empty-icon">📷</span>
       <span>本月还没有照片</span>
+      <span class="empty-hint">后台会自动同步网盘照片，请稍后再来查看</span>
     </div>
     <div v-else class="timeline">
       <div v-for="(photos, date) in sortedPhotosByDate" :key="date" class="timeline-day">
@@ -35,29 +36,16 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 
 const store = useAppStore()
 const modalStore = useModalStore()
 
-// 每小时自动刷新
-let refreshInterval = null
-
 onMounted(() => {
-  // 立即刷新一次
-  store.refreshPhotos()
-  // 每小时自动刷新
-  refreshInterval = setInterval(() => {
-    store.refreshPhotos()
-  }, 60 * 60 * 1000) // 1小时
-})
-
-onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-  }
+  // 加载照片（从数据库获取已预处理的文件）
+  store.fetchPhotos()
 })
 
 // 按日期排序（最新的在前）
@@ -87,10 +75,6 @@ function openPhoto(date, photo) {
 function viewMorePhotos(date, photos) {
   modalStore.openDayPhotos(date, photos)
 }
-
-async function handleRefresh() {
-  await store.refreshPhotos()
-}
 </script>
 
 <style scoped>
@@ -115,37 +99,19 @@ async function handleRefresh() {
   color: var(--text-secondary);
 }
 
-.refresh-btn {
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: none;
-  background: var(--bg);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
+.loading-indicator {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-fast);
   color: var(--text-secondary);
 }
 
-.refresh-btn:hover:not(:disabled) {
-  background: var(--border);
-  color: var(--primary);
+.loading-indicator svg {
+  width: 20px;
+  height: 20px;
 }
 
-.refresh-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.refresh-btn svg {
-  width: 18px;
-  height: 18px;
-}
-
-.refresh-btn svg.spinning {
+.loading-indicator svg.spinning {
   animation: spin 1s linear infinite;
 }
 
@@ -276,5 +242,11 @@ async function handleRefresh() {
 
 .empty-icon {
   font-size: 40px;
+}
+
+.empty-hint {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 4px;
 }
 </style>

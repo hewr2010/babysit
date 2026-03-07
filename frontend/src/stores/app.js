@@ -68,21 +68,26 @@ export const useAppStore = defineStore('app', () => {
   const photosByDate = ref({})
   
   async function fetchPhotos() {
-    const res = await fetch(`${API_BASE}/album/${currentYear.value}/${currentMonth.value}`)
-    const dateGroups = await res.json()
-    
-    // 按日期分组，保持结构
-    photosByDate.value = dateGroups
-    
-    // Flatten for backward compatibility
-    const sortedDates = Object.keys(dateGroups).sort().reverse()
-    let allPhotos = []
-    for (const date of sortedDates) {
-      const files = dateGroups[date]
-      files.sort((a, b) => (b.time || '').localeCompare(a.time || ''))
-      allPhotos = allPhotos.concat(files)
+    loading.value = true
+    try {
+      const res = await fetch(`${API_BASE}/album/${currentYear.value}/${currentMonth.value}`)
+      const dateGroups = await res.json()
+      
+      // 按日期分组，保持结构
+      photosByDate.value = dateGroups
+      
+      // Flatten for backward compatibility
+      const sortedDates = Object.keys(dateGroups).sort().reverse()
+      let allPhotos = []
+      for (const date of sortedDates) {
+        const files = dateGroups[date]
+        files.sort((a, b) => (b.time || '').localeCompare(a.time || ''))
+        allPhotos = allPhotos.concat(files)
+      }
+      photos.value = allPhotos
+    } finally {
+      loading.value = false
     }
-    photos.value = allPhotos
   }
   
   async function fetchGrowth() {
@@ -152,13 +157,6 @@ export const useAppStore = defineStore('app', () => {
     }
   }
   
-  async function refreshPhotos() {
-    loading.value = true
-    await fetch(`${API_BASE}/album/refresh`)
-    await fetchPhotos()
-    loading.value = false
-  }
-  
   async function init() {
     loadFromURL()  // 先加载URL参数
     await fetchBaby()
@@ -189,7 +187,6 @@ export const useAppStore = defineStore('app', () => {
     fetchBaby,
     saveBaby,
     fetchPhotos,
-    refreshPhotos,
     fetchGrowth,
     addGrowth,
     deleteGrowth,
