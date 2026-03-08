@@ -16,7 +16,7 @@ dependencies = [
     "pillow>=10.0.0",
     "pillow-heif>=0.15.0",
     "asgiref>=3.7.0",
-    "uvicorn>=0.24.0",
+    "gunicorn>=21.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]

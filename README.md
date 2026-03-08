@@ -28,11 +28,15 @@ bypy info
 ### 1. 启动主应用（Web 服务）
 
 ```bash
-# 开发模式
+# 开发模式（单进程，有热重载）
 python -m babysit.app
 
-# 生产模式
-uvicorn babysit.asgi:app --host 0.0.0.0 --port 8080 --workers 4
+# 生产模式（多进程，更稳定）
+gunicorn -w 2 -b 0.0.0.0:8080 "babysit.app:create_app()"
+
+# 指定端口
+PORT=9000 python -m babysit.app
+gunicorn -w 2 -b 0.0.0.0:9000 "babysit.app:create_app()"
 ```
 
 ### 2. 启动后台媒体刷新进程（另一个终端）
