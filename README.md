@@ -23,12 +23,25 @@ bypy info
 
 ## 使用
 
+需要同时运行两个进程：
+
+### 1. 启动主应用（Web 服务）
+
 ```bash
-python babysit/app.py
+# 开发模式
+python -m babysit.app
 
 # 生产模式
 uvicorn babysit.asgi:app --host 0.0.0.0 --port 8080 --workers 4
 ```
+
+### 2. 启动后台媒体刷新进程（另一个终端）
+
+```bash
+python -m babysit.refresh_media
+```
+
+该进程每 3 分钟从百度网盘获取多媒体文件列表，并进行预处理（生成缩略图、预览图、提取视频等），只有完全完成预处理的文件才会在数据库中标记为可用。
 
 访问 http://localhost:8080
 
