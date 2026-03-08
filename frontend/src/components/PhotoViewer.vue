@@ -8,7 +8,11 @@
         <button class="close-btn" @click="close">✕</button>
         
         <div class="viewer-content">
-          <div v-if="loading" class="loading">
+          <div v-if="loadError" class="load-error">
+            <span>{{ loadError }}</span>
+          </div>
+          
+          <div v-else-if="loading" class="loading">
             <div class="spinner"></div>
             <span>加载中...</span>
           </div>
@@ -23,7 +27,11 @@
           <video v-else-if="currentPhoto?.type === 'video' && isSupportedVideoFormat" 
                  :src="videoUrl" 
                  controls 
-                 autoplay />
+                 playsinline
+                 @canplay="loading = false"
+                 @loadedmetadata="loading = false"
+                 @error="onVideoError"
+                 style="max-width: 90vw; max-height: 80vh;" />
           
           <!-- 不支持的视频格式：显示缩略图 -->
           <div v-else-if="currentPhoto?.type === 'video' && !isSupportedVideoFormat" class="unsupported-video">
@@ -61,6 +69,7 @@ const store = useAppStore()
 const modalStore = useModalStore()
 
 const loading = ref(true)
+const loadError = ref('')
 const previewUrl = ref('')
 const videoUrl = ref('')
 
@@ -93,6 +102,7 @@ async function loadPhoto() {
   if (!modalStore.photoViewer || !currentPhoto.value) return
   
   loading.value = true
+  loadError.value = ''
   previewUrl.value = ''
   videoUrl.value = ''
   
@@ -102,12 +112,15 @@ async function loadPhoto() {
   } else if (currentPhoto.value.type === 'video') {
     if (isSupportedVideoFormat.value) {
       const filename = currentPhoto.value.name
+      const lowerName = filename.toLowerCase()
       // .livp 文件使用已预提取的视频
-      if (filename.toLowerCase().endsWith('.livp')) {
+      if (lowerName.endsWith('.livp')) {
         videoUrl.value = `/livp/${encodeURIComponent(filename)}`
+      } else if (lowerName.endsWith('.mov') || lowerName.endsWith('.mp4')) {
+        // .mov 和 .mp4 使用直链播放
+        videoUrl.value = `/video/${encodeURIComponent(filename)}`
       } else {
-        // 其他视频格式：不支持直接播放，因为没有预处理
-        // 这里应该不会出现，因为 refresh_media 会预处理所有视频
+        // 其他视频格式：显示缩略图
         previewUrl.value = `/preview/${encodeURIComponent(filename)}`
       }
       loading.value = false
@@ -132,6 +145,7 @@ function close() {
   modalStore.photoViewer = false
   previewUrl.value = ''
   videoUrl.value = ''
+  loadError.value = ''
 }
 
 function prev() {
@@ -144,6 +158,12 @@ function next() {
   if (canNext.value) {
     modalStore.photoViewerIndex++
   }
+}
+
+function onVideoError(e) {
+  console.error('Video load error:', e)
+  loading.value = false
+  loadError.value = '视频加载失败，请稍后重试'
 }
 </script>
 
@@ -216,6 +236,18 @@ function next() {
   align-items: center;
   gap: 16px;
   color: white;
+}
+
+.load-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  color: #ff6b6b;
+  font-size: 16px;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 8px;
 }
 
 .spinner {

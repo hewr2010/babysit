@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, quote
 
-from flask import Flask, render_template, jsonify, request, send_file, send_from_directory
+from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, redirect
 from PIL import Image
 
 from .config import DATA_DIR, CACHE_DIR
@@ -147,6 +147,30 @@ def create_app():
             return send_file(cache_file, mimetype='video/quicktime')
         
         return jsonify({"error": "视频未预处理完成"}), 404
+    
+    @app.route("/video/<path:filename>")
+    def video_proxy(filename):
+        """获取视频文件（从本地缓存，避免 CORS 问题）"""
+        try:
+            filename = unquote(filename)
+        except:
+            pass
+        
+        # 验证文件类型
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ('.mov', '.mp4'):
+            return jsonify({"error": "不支持的视频格式"}), 400
+        
+        # 首先尝试从本地缓存读取
+        cache_key = quote(filename, safe='')
+        cache_file = CACHE_DIR / "videos" / cache_key
+        
+        if cache_file.exists():
+            mimetype = 'video/quicktime' if ext == '.mov' else 'video/mp4'
+            return send_file(cache_file, mimetype=mimetype)
+        
+        # 缓存不存在，返回 404（让 refresh_media 去下载）
+        return jsonify({"error": "视频未缓存，请等待后台处理"}), 404
     
     return app
 

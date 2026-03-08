@@ -346,7 +346,7 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
             print(f"    ❌ 预览图生成失败")
             return False, file_info
         
-        # 如果是 .livp 文件，提取视频
+        # 处理视频文件：.livp 提取视频，.mov/.mp4 直接保存
         if ext == '.livp':
             video_data = extract_livp_video(file_data, filename)
             if video_data:
@@ -357,6 +357,12 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
             else:
                 print(f"    ❌ 视频提取失败")
                 return False, file_info
+        elif ext in ('.mov', '.mp4'):
+            # 直接下载视频文件到本地（避免浏览器 CORS 问题）
+            video_path = videos_dir / f"{quote(filename, safe='')}"
+            with open(video_path, 'wb') as f:
+                f.write(file_data)
+            print(f"    ✓ 视频已缓存")
         
         file_info['processed'] = True
         file_info['processed_at'] = datetime.now().isoformat()
@@ -415,6 +421,7 @@ def refresh_media():
         
         for file_info in media_files:
             filename = file_info['name']
+            ext = os.path.splitext(filename)[1].lower()
             md5 = file_info.get('md5', '')
             current_names.add(filename)
             
@@ -426,8 +433,21 @@ def refresh_media():
             existing = cursor.fetchone()
             
             if existing and existing['md5'] == md5 and existing['processed']:
-                # 文件未改变且已处理，跳过
-                continue
+                # 文件未改变且已处理，检查缓存文件是否完整（视频文件需要检查视频缓存）
+                need_reprocess = False
+                if filename.lower().endswith('.livp'):
+                    video_path = videos_dir / f"{quote(filename, safe='')}.mov"
+                    if not video_path.exists():
+                        print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
+                        need_reprocess = True
+                elif ext in ('.mov', '.mp4'):
+                    video_path = videos_dir / f"{quote(filename, safe='')}"
+                    if not video_path.exists():
+                        print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
+                        need_reprocess = True
+                
+                if not need_reprocess:
+                    continue
             
             # 需要处理这个文件
             success, updated_info = process_media_file(
