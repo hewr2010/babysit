@@ -127,16 +127,16 @@ def add_baby(data):
     db.commit()
 
 
-# ===== 生长记录 =====
+# ===== 成长记录 =====
 def get_growth_records():
-    """获取所有生长记录 (按指标类型分开)"""
+    """获取所有成长记录 (按指标类型分开)"""
     db = get_db()
     rows = db.execute("SELECT * FROM growth ORDER BY date DESC, metric_type").fetchall()
     return [dict(r) for r in rows]
 
 
 def add_growth(data):
-    """添加生长记录 (支持单个或多个指标)"""
+    """添加成长记录 (支持单个或多个指标)"""
     db = get_db()
     date = data['date']
     
@@ -157,7 +157,7 @@ def add_growth(data):
 
 
 def delete_growth(id):
-    """删除生长记录"""
+    """删除成长记录"""
     db = get_db()
     db.execute("DELETE FROM growth WHERE id = ?", (id,))
     db.commit()

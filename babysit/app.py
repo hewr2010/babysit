@@ -65,10 +65,10 @@ def create_app():
             return jsonify({"message": "保存成功"})
         return jsonify(get_baby() or {})
     
-    # ===== 生长记录 =====
+    # ===== 成长记录 =====
     @app.route("/api/growth", methods=["GET", "POST"])
     def api_growth():
-        """生长记录"""
+        """成长记录"""
         if request.method == "POST":
             add_growth(request.json)
             return jsonify({"message": "保存成功"})
@@ -76,7 +76,7 @@ def create_app():
     
     @app.route("/api/growth/<int:id>", methods=["DELETE"])
     def api_delete_growth(id):
-        """删除生长记录"""
+        """删除成长记录"""
         delete_growth(id)
         return jsonify({"message": "删除成功"})
     

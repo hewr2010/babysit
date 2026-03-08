@@ -1,7 +1,7 @@
 <template>
   <section class="growth-section animate-fadeInUp stagger-2">
     <div class="section-header">
-      <h2 class="section-title">生长记录</h2>
+      <h2 class="section-title">成长记录</h2>
     </div>
     
     <div v-if="store.growthRecords.length > 0" class="growth-content">
@@ -156,6 +156,26 @@ const chartOption = computed(() => {
   const series = []
   const legendData = []
   
+  // 计算身高数据的最小/最大值用于 Y 轴范围
+  let heightMin = null, heightMax = null
+  if (heightRecords.length > 0) {
+    const heightValues = heightRecords.map(r => r.value).filter(v => v !== null && v !== undefined)
+    if (heightValues.length > 0) {
+      heightMin = Math.min(...heightValues)
+      heightMax = Math.max(...heightValues)
+    }
+  }
+  
+  // 计算体重数据的最小/最大值用于 Y 轴范围
+  let weightMin = null, weightMax = null
+  if (weightRecords.length > 0) {
+    const weightValues = weightRecords.map(r => r.value).filter(v => v !== null && v !== undefined)
+    if (weightValues.length > 0) {
+      weightMin = Math.min(...weightValues)
+      weightMax = Math.max(...weightValues)
+    }
+  }
+  
   if (heightRecords.length > 0) {
     // 身高数据：只在自己有的日期上显示，其他日期用 null
     const heightData = allDates.map(date => {
@@ -198,6 +218,37 @@ const chartOption = computed(() => {
     legendData.push('体重(g)')
   }
   
+  // 构建 Y 轴配置，根据实际数据范围设置 min/max
+  const yAxis = []
+  
+  if (heightMin !== null && heightMax !== null) {
+    const heightPadding = (heightMax - heightMin) * 0.1 || 1 // 10% 的边距，避免数据贴边
+    yAxis.push({
+      type: 'value',
+      name: '身高(cm)',
+      position: 'left',
+      min: Math.max(0, heightMin - heightPadding),
+      max: heightMax + heightPadding,
+      axisLabel: { fontSize: 10, color: '#ec4899' },
+      axisLine: { show: true, lineStyle: { color: '#ec4899' } },
+      splitLine: { show: false }
+    })
+  }
+  
+  if (weightMin !== null && weightMax !== null) {
+    const weightPadding = (weightMax - weightMin) * 0.1 || 10
+    yAxis.push({
+      type: 'value',
+      name: '体重(g)',
+      position: 'right',
+      min: Math.max(0, weightMin - weightPadding),
+      max: weightMax + weightPadding,
+      axisLabel: { fontSize: 10, color: '#22c55e' },
+      axisLine: { show: true, lineStyle: { color: '#22c55e' } },
+      splitLine: { show: false }
+    })
+  }
+  
   return {
     tooltip: {
       trigger: 'axis',
@@ -219,24 +270,7 @@ const chartOption = computed(() => {
       axisLabel: { fontSize: 10 },
       triggerEvent: true
     },
-    yAxis: [
-      {
-        type: 'value',
-        name: '身高(cm)',
-        position: 'left',
-        axisLabel: { fontSize: 10, color: '#ec4899' },
-        axisLine: { show: true, lineStyle: { color: '#ec4899' } },
-        splitLine: { show: false }
-      },
-      {
-        type: 'value',
-        name: '体重(g)',
-        position: 'right',
-        axisLabel: { fontSize: 10, color: '#22c55e' },
-        axisLine: { show: true, lineStyle: { color: '#22c55e' } },
-        splitLine: { show: false }
-      }
-    ],
+    yAxis: yAxis,
     series: series.map((s, i) => ({
       ...s,
       yAxisIndex: i // 身高用左轴，体重用右轴
