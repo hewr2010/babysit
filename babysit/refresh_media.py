@@ -433,18 +433,33 @@ def refresh_media():
             existing = cursor.fetchone()
             
             if existing and existing['md5'] == md5 and existing['processed']:
-                # 文件未改变且已处理，检查缓存文件是否完整（视频文件需要检查视频缓存）
+                # 文件未改变且已处理，检查缓存文件是否完整
                 need_reprocess = False
-                if filename.lower().endswith('.livp'):
-                    video_path = videos_dir / f"{quote(filename, safe='')}.mov"
-                    if not video_path.exists():
-                        print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
-                        need_reprocess = True
-                elif ext in ('.mov', '.mp4'):
-                    video_path = videos_dir / f"{quote(filename, safe='')}"
-                    if not video_path.exists():
-                        print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
-                        need_reprocess = True
+                
+                # 检查缩略图是否存在
+                thumb_path = thumbs_dir / f"{quote(filename, safe='')}_200x200.jpg"
+                if not thumb_path.exists():
+                    print(f"  ⚠️ {filename} 的缩略图缺失，需要重新处理")
+                    need_reprocess = True
+                
+                # 检查预览图是否存在
+                preview_path = previews_dir / f"{quote(filename, safe='')}_800x800.jpg"
+                if not preview_path.exists():
+                    print(f"  ⚠️ {filename} 的预览图缺失，需要重新处理")
+                    need_reprocess = True
+                
+                # 检查视频缓存（视频文件需要检查视频缓存）
+                if not need_reprocess:
+                    if filename.lower().endswith('.livp'):
+                        video_path = videos_dir / f"{quote(filename, safe='')}.mov"
+                        if not video_path.exists():
+                            print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
+                            need_reprocess = True
+                    elif ext in ('.mov', '.mp4'):
+                        video_path = videos_dir / f"{quote(filename, safe='')}"
+                        if not video_path.exists():
+                            print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
+                            need_reprocess = True
                 
                 if not need_reprocess:
                     continue
