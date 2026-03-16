@@ -203,7 +203,112 @@ def create_app():
                 "size_formatted": format_file_size(file_size)
             }), 413
         
-        # 获取百度网盘直链
+        # livp 文件特殊处理：提取 mov 视频
+        if ext == '.livp':
+            return download_livp_video(filename, file_size)
+        
+        # 普通文件：流式代理
+        return stream_proxy_download(filename, file_size)
+    
+    def download_livp_video(filename, file_size):
+        """从 livp 中提取 mov 视频并流式返回"""
+        from .baidu import get_download_url
+        import requests
+        import zipfile
+        
+        download_url, error = get_download_url(filename)
+        if error or not download_url:
+            return jsonify({"error": "无法获取下载链接", "details": error}), 500
+        
+        temp_livp_path = None
+        
+        try:
+            # 流式下载 livp 到临时文件（避免内存溢出）
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.livp') as temp_livp:
+                temp_livp_path = temp_livp.name
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                }
+                
+                with requests.get(download_url, stream=True, headers=headers, timeout=120) as resp:
+                    if resp.status_code != 200:
+                        return jsonify({"error": f"下载失败: {resp.status_code}"}), 500
+                    
+                    # 流式写入临时文件
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            temp_livp.write(chunk)
+            
+            # 打开 zip 文件并保持引用
+            z = zipfile.ZipFile(temp_livp_path, 'r')
+            
+            # 找到 mov 文件
+            mov_name = None
+            for name in z.namelist():
+                if name.lower().endswith('.mov'):
+                    mov_name = name
+                    break
+            
+            if not mov_name:
+                z.close()
+                os.unlink(temp_livp_path)
+                return jsonify({"error": "livp 中未找到视频"}), 500
+            
+            # 获取 mov 文件信息
+            mov_info = z.getinfo(mov_name)
+            mov_size = mov_info.file_size
+            
+            # 构造下载文件名
+            download_name = filename.replace('.livp', '.mov')
+            
+            # 流式返回 mov 文件 - 使用闭包保持文件引用
+            mov_file = z.open(mov_name)
+            
+            def generate_mov():
+                try:
+                    while True:
+                        chunk = mov_file.read(65536)
+                        if not chunk:
+                            break
+                        yield chunk
+                finally:
+                    # 清理资源
+                    try:
+                        mov_file.close()
+                    except:
+                        pass
+                    try:
+                        z.close()
+                    except:
+                        pass
+                    try:
+                        if temp_livp_path:
+                            os.unlink(temp_livp_path)
+                    except:
+                        pass
+            
+            return Response(
+                generate_mov(),
+                mimetype='video/quicktime',
+                headers={
+                    'Content-Disposition': f'attachment; filename="{download_name}"',
+                    'Content-Length': str(mov_size)
+                }
+            )
+                
+        except Exception as e:
+            # 清理资源
+            try:
+                if temp_livp_path:
+                    os.unlink(temp_livp_path)
+            except:
+                pass
+            return jsonify({"error": f"提取视频失败: {str(e)}"}), 500
+    
+    def stream_proxy_download(filename, file_size):
+        """普通文件的流式代理下载"""
         from .baidu import get_download_url
         import requests
         
@@ -211,26 +316,21 @@ def create_app():
         if error or not download_url:
             return jsonify({"error": "无法获取下载链接", "details": error}), 500
         
-        # 流式代理 - 从百度网盘读取，立即传给浏览器
         mimetype = get_mimetype(filename)
         
         def generate():
             try:
-                # 设置合适的 headers 模拟正常浏览器请求
                 headers = {
                     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
                     'Accept': '*/*',
                     'Accept-Encoding': 'identity',
-                    'Connection': 'keep-alive',
                 }
                 
-                # 流式请求百度网盘
                 with requests.get(download_url, stream=True, headers=headers, timeout=60) as resp:
                     if resp.status_code != 200:
                         print(f"Baidu download error: {resp.status_code}")
                         return
                     
-                    # 流式传输给客户端
                     for chunk in resp.iter_content(chunk_size=65536):
                         if chunk:
                             yield chunk

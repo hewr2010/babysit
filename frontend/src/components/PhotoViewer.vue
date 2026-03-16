@@ -63,13 +63,16 @@
             <button 
               class="download-original-btn" 
               @click="downloadOriginal"
-              :disabled="isDownloading || isOversized || isLivp"
-              :class="{ 'downloading': isDownloading, 'oversized': isOversized, 'livp': isLivp }"
+              :disabled="isDownloading || isOversized"
+              :class="{ 'downloading': isDownloading, 'oversized': isOversized }"
             >
               <span v-if="isDownloading" class="btn-spinner"></span>
               <template v-else-if="isLivp">
-                <span class="btn-icon">🚫</span>
-                <span class="btn-text">暂不支持下载</span>
+                <span class="btn-icon">⬇️</span>
+                <span class="btn-text">
+                  下载视频
+                  <span v-if="currentPhoto?.size" class="size-in-btn">({{ formatFileSize(currentPhoto.size) }})</span>
+                </span>
               </template>
               <template v-else-if="isOversized">
                 <span class="btn-icon">📦</span>
@@ -161,7 +164,7 @@ function formatFileSize(size) {
 
 // 下载原文件 - 使用 a 标签触发浏览器下载
 async function downloadOriginal() {
-  if (!currentPhoto.value || isDownloading.value || isOversized.value || isLivp.value) return
+  if (!currentPhoto.value || isDownloading.value || isOversized.value) return
   
   isDownloading.value = true
   
@@ -484,10 +487,7 @@ function onVideoError(e) {
   font-size: 11px;
 }
 
-.download-original-btn.livp {
-  background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%);
-  font-size: 11px;
-}
+
 
 .btn-icon {
   font-size: 12px;
