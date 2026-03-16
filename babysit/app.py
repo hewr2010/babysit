@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, quote
 
-from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, redirect
+from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, redirect, Response
 from PIL import Image
 
 from .config import DATA_DIR, CACHE_DIR
@@ -19,6 +19,7 @@ from .db import (init_db, close_db, get_baby, add_baby,
                  get_growth_records, add_growth, delete_growth,
                  get_all_processed_media, get_processed_media_by_month)
 from .utils import calculate_age
+from .baidu import get_file_info, run_bypy
 
 # Vue3 frontend dist directory
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
@@ -171,6 +172,106 @@ def create_app():
         
         # 缓存不存在，返回 404（让 refresh_media 去下载）
         return jsonify({"error": "视频未缓存，请等待后台处理"}), 404
+    
+    # ===== 原文件下载（服务器流式代理，不落盘）=====
+    MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024  # 50MB
+    
+    @app.route("/api/download/<path:filename>")
+    def download_original(filename):
+        """流式下载原文件 - 服务器代理，不缓存到磁盘（限制 50MB）"""
+        try:
+            filename = unquote(filename)
+        except:
+            pass
+        
+        # 验证文件类型
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in ('.jpg', '.jpeg', '.png', '.mp4', '.mov', '.heic', '.livp'):
+            return jsonify({"error": "不支持的文件格式"}), 400
+        
+        # 获取文件信息（检查大小）
+        file_info = get_file_info(filename)
+        if not file_info:
+            return jsonify({"error": "无法获取文件信息"}), 404
+        
+        file_size = file_info.get('size', 0)
+        if file_size > MAX_DOWNLOAD_SIZE:
+            return jsonify({
+                "error": "文件过大",
+                "message": f"文件大小 {format_file_size(file_size)} 超过 50MB 限制，无法下载",
+                "size": file_size,
+                "size_formatted": format_file_size(file_size)
+            }), 413
+        
+        # 获取百度网盘直链
+        from .baidu import get_download_url
+        import requests
+        
+        download_url, error = get_download_url(filename)
+        if error or not download_url:
+            return jsonify({"error": "无法获取下载链接", "details": error}), 500
+        
+        # 流式代理 - 从百度网盘读取，立即传给浏览器
+        mimetype = get_mimetype(filename)
+        
+        def generate():
+            try:
+                # 设置合适的 headers 模拟正常浏览器请求
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                    'Accept': '*/*',
+                    'Accept-Encoding': 'identity',
+                    'Connection': 'keep-alive',
+                }
+                
+                # 流式请求百度网盘
+                with requests.get(download_url, stream=True, headers=headers, timeout=60) as resp:
+                    if resp.status_code != 200:
+                        print(f"Baidu download error: {resp.status_code}")
+                        return
+                    
+                    # 流式传输给客户端
+                    for chunk in resp.iter_content(chunk_size=65536):
+                        if chunk:
+                            yield chunk
+                            
+            except Exception as e:
+                print(f"Stream proxy error: {e}")
+                raise
+        
+        return Response(
+            generate(),
+            mimetype=mimetype,
+            headers={
+                'Content-Disposition': f'attachment; filename="{filename}"',
+                'Content-Length': str(file_size)
+            }
+        )
+    
+    def get_mimetype(filename):
+        """根据文件名获取 MIME 类型"""
+        ext = os.path.splitext(filename)[1].lower()
+        mime_types = {
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.mp4': 'video/mp4',
+            '.mov': 'video/quicktime',
+            '.heic': 'image/heic',
+            '.livp': 'application/octet-stream'
+        }
+        return mime_types.get(ext, 'application/octet-stream')
+    
+    def format_file_size(size):
+        """格式化文件大小"""
+        if size < 1024:
+            return f"{size}B"
+        elif size < 1024 * 1024:
+            return f"{size / 1024:.1f}KB"
+        elif size < 1024 * 1024 * 1024:
+            return f"{size / (1024 * 1024):.1f}MB"
+        else:
+            return f"{size / (1024 * 1024 * 1024):.2f}GB"
     
     return app
 

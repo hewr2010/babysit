@@ -27,6 +27,18 @@ def run_bypy(cmd, timeout=60):
         f"bypy {cmd}", shell=True, capture_output=True, text=True, timeout=timeout
     )
 
+def get_file_info(filename):
+    """获取百度网盘上指定文件的详细信息"""
+    result = run_bypy(f"list '{BAIDU_REMOTE_PATH}'")
+    if result.returncode != 0:
+        return None
+    
+    files = parse_bypy_list(result.stdout)
+    for f in files:
+        if f['name'] == filename:
+            return f
+    return None
+
 def extract_datetime_from_filename(filename):
     """从文件名提取拍摄日期和时间，返回(date_str, time_str)"""
     import re
@@ -134,7 +146,7 @@ def parse_bypy_list(output):
                 if size_idx > 1:
                     # 文件名是 parts[1] 到 parts[size_idx-1]
                     filename = ' '.join(parts[1:size_idx])
-                    size = parts[size_idx]
+                    size = int(parts[size_idx])
                     # 网盘日期在 size 之后
                     baidu_date_str = parts[size_idx + 1].rstrip(',')
                     
