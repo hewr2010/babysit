@@ -55,6 +55,9 @@ def create_app():
             # Check if file exists in dist
             file_path = FRONTEND_DIST / filename
             if file_path.exists() and file_path.is_file():
+                # 为 txt 文件显式设置 mimetype，确保微信验证能正确识别
+                if filename.endswith('.txt'):
+                    return send_from_directory(FRONTEND_DIST, filename, mimetype='text/plain')
                 return send_from_directory(FRONTEND_DIST, filename)
         return jsonify({"error": "Not found"}), 404
     
