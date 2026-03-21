@@ -1,8 +1,9 @@
 <template>
-  <div class="app">
-    <div class="app-container">
-      <router-view />
-    </div>
+  <AuthGuard>
+    <div class="app">
+      <div class="app-container">
+        <router-view />
+      </div>
 
     <!-- 底部 Tab Bar -->
     <div class="tab-bar">
@@ -60,13 +61,15 @@
     <AllPhotosModal />
     <DayPhotosModal />
     <MilestoneEditor />
-  </div>
+    </div>
+  </AuthGuard>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useModalStore } from './stores/modal'
+import AuthGuard from './components/AuthGuard.vue'
 import BabyModal from './components/BabyModal.vue'
 import GrowthModal from './components/GrowthModal.vue'
 import PhotoViewer from './components/PhotoViewer.vue'
