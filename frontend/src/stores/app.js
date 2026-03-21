@@ -11,6 +11,7 @@ export const useAppStore = defineStore('app', () => {
   const currentMonth = ref(dayjs().month() + 1)
   const photos = ref([])
   const growthRecords = ref([])
+  const milestones = ref([])
   const loading = ref(false)
 
   // Getters
@@ -109,6 +110,15 @@ export const useAppStore = defineStore('app', () => {
     await fetchGrowth()
   }
 
+  async function fetchMilestones() {
+    try {
+      const res = await fetch(`${API_BASE}/milestones`)
+      milestones.value = await res.json()
+    } catch (e) {
+      console.error('Failed to fetch milestones:', e)
+    }
+  }
+
   function changeMonth(delta) {
     let newMonth = currentMonth.value + delta
     let newYear = currentYear.value
@@ -166,7 +176,8 @@ export const useAppStore = defineStore('app', () => {
     await fetchBaby()
     await Promise.all([
       fetchPhotos(),
-      fetchGrowth()
+      fetchGrowth(),
+      fetchMilestones()
     ])
     updateURL()  // 更新URL保证一致
   }
@@ -182,6 +193,7 @@ export const useAppStore = defineStore('app', () => {
     photos,
     photosByDate,
     growthRecords,
+    milestones,
     loading,
     babyAge,
     babyAgeDisplay,
@@ -194,6 +206,7 @@ export const useAppStore = defineStore('app', () => {
     fetchGrowth,
     addGrowth,
     deleteGrowth,
+    fetchMilestones,
     changeMonth,
     setMonth,
     init

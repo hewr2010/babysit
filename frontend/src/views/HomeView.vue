@@ -115,7 +115,7 @@ watch(() => route.query.photo, (newPhoto) => {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 0 16px;
+  padding: 20px 16px 0;
 }
 
 .safe-area {
@@ -150,7 +150,7 @@ watch(() => route.query.photo, (newPhoto) => {
   }
 
   .main-content {
-    padding: 0 24px;
+    padding: 24px 24px 0;
   }
 
   .safe-area {

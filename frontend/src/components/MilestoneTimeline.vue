@@ -1,7 +1,7 @@
 <template>
-  <section class="milestone-section" v-if="milestones.length > 0">
+  <section class="milestone-section" v-if="monthlyMilestones.length > 0">
     <div class="section-header">
-      <h2 class="section-title">⭐ 重要时刻 ({{ milestones.length }}个)</h2>
+      <h2 class="section-title">⭐ 重要时刻 ({{ monthlyMilestones.length }}个)</h2>
       <router-link to="/milestones/manage" class="manage-link">
         <span>📝 管理</span>
       </router-link>
@@ -10,7 +10,7 @@
     <div class="timeline-scroll">
       <div class="timeline-container">
         <div
-          v-for="milestone in milestones"
+          v-for="milestone in monthlyMilestones"
           :key="milestone.id"
           class="milestone-card"
           @click="openMilestone(milestone)"
@@ -34,8 +34,8 @@
     </div>
   </section>
 
-  <!-- 空状态 - 提示用户可以标记时刻 -->
-  <section class="milestone-section empty" v-else>
+  <!-- 空状态 - 完全没有时刻时提示用户 -->
+  <section class="milestone-section empty" v-else-if="store.milestones.length === 0">
     <div class="section-header">
       <h2 class="section-title">⭐ 重要时刻</h2>
     </div>
@@ -52,28 +52,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 
-const API_BASE = '/api'
-
 const store = useAppStore()
 const modalStore = useModalStore()
-const milestones = ref([])
 
-onMounted(() => {
-  fetchMilestones()
+// 只显示当月的重要时刻
+const monthlyMilestones = computed(() => {
+  const year = store.currentYear
+  const month = String(store.currentMonth).padStart(2, '0')
+  const prefix = `${year}-${month}`
+  return store.milestones.filter(m => m.date && m.date.startsWith(prefix))
 })
-
-async function fetchMilestones() {
-  try {
-    const res = await fetch(`${API_BASE}/milestones`)
-    milestones.value = await res.json()
-  } catch (e) {
-    console.error('Failed to fetch milestones:', e)
-  }
-}
 
 function formatDate(dateStr) {
   if (!dateStr || dateStr === '0000-00-00') return ''
