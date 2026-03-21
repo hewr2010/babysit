@@ -47,10 +47,11 @@
 
         <!-- 已有关联时刻 -->
         <div v-if="milestones.length > 0" class="milestones-bar">
-          <div class="milestone-tags">
-            <span v-for="ms in milestones" :key="ms.id" class="milestone-tag">
-              ⭐ {{ ms.title }}
-            </span>
+          <div class="milestone-list">
+            <div v-for="ms in milestones" :key="ms.id" class="milestone-item">
+              <div class="milestone-title">⭐ {{ ms.title }}</div>
+              <div v-if="ms.description" class="milestone-desc">{{ ms.description }}</div>
+            </div>
           </div>
         </div>
 
@@ -499,23 +500,36 @@ function onVideoSuccess() {
   transform: translateX(-50%);
   z-index: 410;
   max-width: 90vw;
+  max-height: 30vh;
+  overflow-y: auto;
 }
 
-.milestone-tags {
+.milestone-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
-  justify-content: center;
+  align-items: center;
 }
 
-.milestone-tag {
-  padding: 6px 14px;
+.milestone-item {
+  padding: 10px 16px;
   background: rgba(236, 72, 153, 0.9);
   color: white;
-  border-radius: 20px;
-  font-size: 13px;
-  font-weight: 500;
+  border-radius: 12px;
   backdrop-filter: blur(8px);
+  max-width: 80vw;
+}
+
+.milestone-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.milestone-desc {
+  font-size: 12px;
+  opacity: 0.9;
+  line-height: 1.4;
 }
 
 /* 底部信息栏 */
