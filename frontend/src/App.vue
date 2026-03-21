@@ -1,30 +1,8 @@
 <template>
   <div class="app">
     <div class="app-container">
-      <Header />
-      <main class="main-content">
-        <GrowthSection />
-        <PhotoSection />
-      </main>
-      <div class="safe-area"></div>
-      
-      <!-- 备案号 -->
-      <footer class="beian-footer">
-        <a 
-          href="https://beian.miit.gov.cn/" 
-          target="_blank" 
-          rel="noopener noreferrer"
-          class="beian-link"
-        >
-          沪ICP备2026008773号-1
-        </a>
-      </footer>
+      <router-view />
     </div>
-    <BabyModal />
-    <GrowthModal />
-    <PhotoViewer />
-    <AllPhotosModal />
-    <DayPhotosModal />
     
     <!-- 底部 Tab Bar -->
     <div class="tab-bar">
@@ -74,30 +52,39 @@
         </div>
       </Transition>
     </Teleport>
+    
+    <!-- 全局弹窗 -->
+    <BabyModal />
+    <GrowthModal />
+    <PhotoViewer />
+    <AllPhotosModal />
+    <DayPhotosModal />
+    <MilestoneEditor />
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
-import { useAppStore } from './stores/app'
+import { ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useModalStore } from './stores/modal'
-import Header from './components/Header.vue'
-import GrowthSection from './components/GrowthSection.vue'
-import PhotoSection from './components/PhotoSection.vue'
 import BabyModal from './components/BabyModal.vue'
 import GrowthModal from './components/GrowthModal.vue'
 import PhotoViewer from './components/PhotoViewer.vue'
 import AllPhotosModal from './components/AllPhotosModal.vue'
 import DayPhotosModal from './components/DayPhotosModal.vue'
+import MilestoneEditor from './components/MilestoneEditor.vue'
 
-const store = useAppStore()
+const route = useRoute()
 const modalStore = useModalStore()
 const currentTab = ref('growth')
 const showActionSheet = ref(false)
 
-onMounted(() => {
-  store.init()
-})
+// 监听路由变化，更新当前标签
+watch(() => route.path, (path) => {
+  if (path === '/' || path.match(/^\/\d{4}\/\d{1,2}$/)) {
+    currentTab.value = 'growth'
+  }
+}, { immediate: true })
 
 function scrollToGrowth() {
   currentTab.value = 'growth'
@@ -129,37 +116,7 @@ function openGrowth(type) {
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
-}
-
-.main-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 0 16px;
-}
-
-.safe-area {
-  height: 80px;
-}
-
-/* 备案号 */
-.beian-footer {
-  text-align: center;
-  padding: 12px 16px 24px;
-  margin-top: -10px;
-}
-
-.beian-link {
-  font-size: 11px;
-  color: #be185d;
-  opacity: 0.5;
-  text-decoration: none;
-  transition: opacity 0.2s ease;
-}
-
-.beian-link:hover {
-  opacity: 0.8;
-  text-decoration: underline;
+  padding-bottom: 80px;
 }
 
 /* PC端 */
@@ -176,23 +133,7 @@ function openGrowth(type) {
     box-shadow: var(--shadow-xl);
     padding: 0 0 20px;
     overflow: hidden;
-  }
-  
-  .main-content {
-    padding: 0 24px;
-  }
-  
-  .safe-area {
-    display: none;
-  }
-  
-  .beian-footer {
-    padding: 20px 24px 24px;
-    margin-top: 0;
-  }
-  
-  .beian-link {
-    font-size: 12px;
+    padding-bottom: 0;
   }
 }
 

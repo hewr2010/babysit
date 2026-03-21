@@ -130,16 +130,20 @@ export const useAppStore = defineStore('app', () => {
     fetchPhotos()
   }
   
-  function setMonth(year, month) {
+  function setMonth(year, month, updateUrl = false) {
     currentYear.value = year
     currentMonth.value = month
-    updateURL()
+    if (updateUrl) {
+      updateURL()
+    }
     fetchPhotos()
   }
   
   function updateURL() {
+    // 只更新路径，保留查询参数
     const path = `/${currentYear.value}/${currentMonth.value}`
-    window.history.replaceState({}, '', path)
+    const query = window.location.search
+    window.history.replaceState({}, '', path + query)
   }
   
   function loadFromURL() {

@@ -28,10 +28,10 @@
                  :src="videoUrl" 
                  controls 
                  playsinline
-                 @canplay="loading = false"
-                 @loadedmetadata="loading = false"
+                 @canplay="onVideoSuccess"
+                 @loadedmetadata="onVideoSuccess"
                  @error="onVideoError"
-                 style="max-width: 90vw; max-height: 80vh;" />
+                 style="max-width: 90vw; max-height: 70vh;" />
           
           <!-- 不支持的视频格式：显示缩略图 -->
           <div v-else-if="currentPhoto?.type === 'video' && !isSupportedVideoFormat" class="unsupported-video">
@@ -45,7 +45,16 @@
           </div>
         </div>
         
-        <!-- 底部信息栏 - 单行布局 -->
+        <!-- 已有关联时刻 -->
+        <div v-if="milestones.length > 0" class="milestones-bar">
+          <div class="milestone-tags">
+            <span v-for="ms in milestones" :key="ms.id" class="milestone-tag">
+              ⭐ {{ ms.title }}
+            </span>
+          </div>
+        </div>
+        
+        <!-- 底部信息栏 -->
         <div class="viewer-actions">
           <div class="bottom-bar">
             <!-- 左侧：翻页指示器 -->
@@ -59,33 +68,40 @@
               <span v-if="currentPhoto?.time">🕒 {{ currentPhoto.time }}</span>
             </div>
             
-            <!-- 右侧：下载按钮（包含文件大小） -->
-            <button 
-              class="download-original-btn" 
-              @click="downloadOriginal"
-              :disabled="isDownloading || isOversized"
-              :class="{ 'downloading': isDownloading, 'oversized': isOversized }"
-            >
-              <span v-if="isDownloading" class="btn-spinner"></span>
-              <template v-else-if="isLivp">
-                <span class="btn-icon">⬇️</span>
-                <span class="btn-text">
-                  下载视频
-                  <span v-if="currentPhoto?.size" class="size-in-btn">({{ formatFileSize(currentPhoto.size) }})</span>
-                </span>
-              </template>
-              <template v-else-if="isOversized">
-                <span class="btn-icon">📦</span>
-                <span class="btn-text">{{ formatFileSize(currentPhoto?.size) }} > 50MB</span>
-              </template>
-              <template v-else>
-                <span class="btn-icon">⬇️</span>
-                <span class="btn-text">
-                  {{ currentPhoto?.type === 'video' ? '原视频' : '原图' }}
-                  <span v-if="currentPhoto?.size" class="size-in-btn">({{ formatFileSize(currentPhoto.size) }})</span>
-                </span>
-              </template>
-            </button>
+            <!-- 右侧操作按钮组 -->
+            <div class="action-buttons">
+              <!-- 标记时刻按钮 -->
+              <button 
+                class="action-btn milestone-btn"
+                @click="openMilestoneEditor"
+                :class="{ 'has-milestone': milestones.length > 0 }"
+              >
+                <span class="btn-icon">⭐</span>
+                <span class="btn-text">标记</span>
+              </button>
+              
+              <!-- 下载按钮 -->
+              <button 
+                class="action-btn download-btn"
+                @click="downloadOriginal"
+                :disabled="isDownloading || isOversized"
+                :class="{ 'downloading': isDownloading, 'oversized': isOversized }"
+              >
+                <span v-if="isDownloading" class="btn-spinner"></span>
+                <template v-else-if="isLivp">
+                  <span class="btn-icon">⬇️</span>
+                  <span class="btn-text">视频</span>
+                </template>
+                <template v-else-if="isOversized">
+                  <span class="btn-icon">📦</span>
+                  <span class="btn-text">{{ formatFileSize(currentPhoto?.size) }} > 50MB</span>
+                </template>
+                <template v-else>
+                  <span class="btn-icon">⬇️</span>
+                  <span class="btn-text">{{ currentPhoto?.type === 'video' ? '视频' : '原图' }}</span>
+                </template>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -95,17 +111,23 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 
+const API_BASE = '/api'
+
 const store = useAppStore()
 const modalStore = useModalStore()
+const route = useRoute()
+const router = useRouter()
 
 const loading = ref(true)
 const loadError = ref('')
 const previewUrl = ref('')
 const videoUrl = ref('')
 const isDownloading = ref(false)
+const milestones = ref([])
 
 const currentIndex = computed(() => modalStore.photoViewerIndex)
 const currentPhoto = computed(() => store.photos[currentIndex.value])
@@ -162,7 +184,41 @@ function formatFileSize(size) {
   }
 }
 
-// 下载原文件 - 使用 a 标签触发浏览器下载
+// 加载关联的时刻
+async function loadMilestones() {
+  if (!currentPhoto.value) {
+    milestones.value = []
+    return
+  }
+  try {
+    const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(currentPhoto.value.name)}`)
+    if (res.ok) {
+      milestones.value = await res.json()
+    }
+  } catch (e) {
+    console.error('Failed to load milestones:', e)
+  }
+}
+
+// 更新 URL 为当前照片
+function updatePhotoURL() {
+  if (currentPhoto.value) {
+    // 只更新 query 参数，保留当前路径和其他参数
+    router.replace({ 
+      query: { 
+        ...route.query,
+        photo: currentPhoto.value.name
+      } 
+    })
+  }
+}
+
+// 打开时刻编辑器
+function openMilestoneEditor() {
+  modalStore.openMilestoneEditor(currentPhoto.value)
+}
+
+// 下载原文件
 async function downloadOriginal() {
   if (!currentPhoto.value || isDownloading.value || isOversized.value) return
   
@@ -200,6 +256,9 @@ async function loadPhoto() {
   previewUrl.value = ''
   videoUrl.value = ''
   
+  // 加载关联的时刻
+  await loadMilestones()
+  
   if (currentPhoto.value.type === 'photo') {
     // 直接显示中等质量预览图（已预生成）
     previewUrl.value = `/preview/${encodeURIComponent(currentPhoto.value.name)}`
@@ -227,12 +286,25 @@ async function loadPhoto() {
 
 // 监听查看器打开
 watch(() => modalStore.photoViewer, (val) => {
-  if (val) loadPhoto()
+  if (val) {
+    loadPhoto()
+    updatePhotoURL()
+  }
 })
 
 // 监听索引变化（左右切换）
 watch(() => modalStore.photoViewerIndex, () => {
-  if (modalStore.photoViewer) loadPhoto()
+  if (modalStore.photoViewer) {
+    loadPhoto()
+    updatePhotoURL()
+  }
+})
+
+// 监听时刻更新事件
+window.addEventListener('milestone-updated', () => {
+  if (modalStore.photoViewer) {
+    loadMilestones()
+  }
 })
 
 function close() {
@@ -240,6 +312,13 @@ function close() {
   previewUrl.value = ''
   videoUrl.value = ''
   loadError.value = ''
+  milestones.value = []
+  
+  // 清除 URL 中的 photo 参数（仅在非管理页面）
+  if (route.query.photo && !route.path.includes('/milestones/manage')) {
+    const { photo, ...otherQuery } = route.query
+    router.replace({ query: otherQuery })
+  }
 }
 
 function prev() {
@@ -259,6 +338,11 @@ function onVideoError(e) {
   loading.value = false
   loadError.value = '视频加载失败，请稍后重试'
 }
+
+function onVideoSuccess() {
+  loading.value = false
+  loadError.value = ''
+}
 </script>
 
 <style scoped>
@@ -267,6 +351,7 @@ function onVideoError(e) {
   inset: 0;
   background: rgba(0, 0, 0, 0.95);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   z-index: 400;
@@ -274,7 +359,7 @@ function onVideoError(e) {
 
 .viewer-content {
   max-width: 90vw;
-  max-height: 80vh;
+  max-height: 70vh;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -283,19 +368,19 @@ function onVideoError(e) {
 .viewer-content img,
 .viewer-content video {
   max-width: 90vw;
-  max-height: 80vh;
+  max-height: 70vh;
   object-fit: contain;
 }
 
 .preview-image {
   max-width: 90vw;
-  max-height: 80vh;
+  max-height: 70vh;
 }
 
 .unsupported-video {
   position: relative;
   max-width: 90vw;
-  max-height: 80vh;
+  max-height: 70vh;
 }
 
 .video-overlay {
@@ -406,7 +491,34 @@ function onVideoError(e) {
 .nav-btn.prev { left: 20px; }
 .nav-btn.next { right: 20px; }
 
-/* 底部信息栏 - 单行布局 */
+/* 已有关联时刻 */
+.milestones-bar {
+  position: absolute;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 410;
+  max-width: 90vw;
+}
+
+.milestone-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.milestone-tag {
+  padding: 6px 14px;
+  background: rgba(236, 72, 153, 0.9);
+  color: white;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  backdrop-filter: blur(8px);
+}
+
+/* 底部信息栏 */
 .viewer-actions {
   position: absolute;
   bottom: 20px;
@@ -418,10 +530,10 @@ function onVideoError(e) {
 .bottom-bar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 8px 16px;
+  gap: 12px;
+  padding: 10px 16px;
   background: rgba(0, 0, 0, 0.7);
-  border-radius: 24px;
+  border-radius: 28px;
   backdrop-filter: blur(8px);
 }
 
@@ -451,16 +563,19 @@ function onVideoError(e) {
   gap: 4px;
 }
 
-/* 下载按钮 */
-.download-original-btn {
+/* 操作按钮组 */
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.action-btn {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px;
-  background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
-  color: white;
+  padding: 8px 14px;
   border: none;
-  border-radius: 16px;
+  border-radius: 18px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -468,42 +583,54 @@ function onVideoError(e) {
   white-space: nowrap;
 }
 
-.download-original-btn:hover:not(:disabled) {
+.action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 标记时刻按钮 */
+.milestone-btn {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+.milestone-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.milestone-btn.has-milestone {
+  background: rgba(236, 72, 153, 0.8);
+}
+
+.milestone-btn.has-milestone:hover:not(:disabled) {
+  background: rgba(236, 72, 153, 1);
+}
+
+/* 下载按钮 */
+.download-btn {
+  background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
+  color: white;
+}
+
+.download-btn:hover:not(:disabled) {
   transform: scale(1.05);
   box-shadow: 0 4px 12px rgba(236, 72, 153, 0.4);
 }
 
-.download-original-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-}
-
-.download-original-btn.downloading {
+.download-btn.downloading {
   background: linear-gradient(135deg, #9ca3af 0%, #d1d5db 100%);
 }
 
-.download-original-btn.oversized {
+.download-btn.oversized {
   background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%);
-  font-size: 11px;
 }
-
-
 
 .btn-icon {
   font-size: 12px;
 }
 
 .btn-text {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-
-.size-in-btn {
-  opacity: 0.9;
-  font-size: 11px;
-  white-space: nowrap;
+  font-size: 12px;
 }
 
 .btn-spinner {

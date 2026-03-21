@@ -17,7 +17,8 @@ from PIL import Image
 from .config import DATA_DIR, CACHE_DIR
 from .db import (init_db, close_db, get_baby, add_baby, 
                  get_growth_records, add_growth, delete_growth,
-                 get_all_processed_media, get_processed_media_by_month)
+                 get_all_processed_media, get_processed_media_by_month,
+                 get_all_milestones, get_milestones_by_filename, add_milestone, delete_milestone)
 from .utils import calculate_age
 from .baidu import get_file_info, run_bypy
 
@@ -82,6 +83,33 @@ def create_app():
     def api_delete_growth(id):
         """删除成长记录"""
         delete_growth(id)
+        return jsonify({"message": "删除成功"})
+    
+    # ===== 重要时刻 =====
+    @app.route("/api/milestones", methods=["GET", "POST"])
+    def api_milestones():
+        """获取所有重要时刻或创建新时刻"""
+        if request.method == "POST":
+            data = request.json
+            if not data.get('media_filename') or not data.get('title'):
+                return jsonify({"error": "media_filename 和 title 是必填项"}), 400
+            add_milestone(data)
+            return jsonify({"message": "标记成功"})
+        return jsonify(get_all_milestones())
+    
+    @app.route("/api/milestones/<path:filename>", methods=["GET"])
+    def api_milestones_by_filename(filename):
+        """获取某张照片关联的所有重要时刻"""
+        try:
+            filename = unquote(filename)
+        except:
+            pass
+        return jsonify(get_milestones_by_filename(filename))
+    
+    @app.route("/api/milestones/<int:id>", methods=["DELETE"])
+    def api_delete_milestone(id):
+        """删除重要时刻"""
+        delete_milestone(id)
         return jsonify({"message": "删除成功"})
     
     # ===== 相册 =====

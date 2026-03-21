@@ -95,6 +95,25 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_media_processed ON media_files(processed, date DESC)
     ''')
     
+    # 重要时刻表 - 标记照片的重要时刻
+    db.execute('''
+        CREATE TABLE IF NOT EXISTS milestones (
+            id INTEGER PRIMARY KEY,
+            media_filename TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (media_filename) REFERENCES media_files(filename),
+            UNIQUE(media_filename, title)
+        )
+    ''')
+    db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_milestones_filename ON milestones(media_filename)
+    ''')
+    db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_milestones_created ON milestones(created_at DESC)
+    ''')
+    
     # 初始化默认宝宝信息（青青）
     cursor = db.execute("SELECT COUNT(*) FROM baby")
     if cursor.fetchone()[0] == 0:
@@ -283,3 +302,64 @@ def get_media_filenames():
     db = get_db()
     rows = db.execute("SELECT filename FROM media_files").fetchall()
     return {row['filename'] for row in rows}
+
+
+# ===== 重要时刻 =====
+def get_all_milestones():
+    """获取所有重要时刻，包含媒体文件信息"""
+    db = get_db()
+    rows = db.execute('''
+        SELECT m.id, m.media_filename, m.title, m.description, m.created_at,
+               mf.date, mf.time, mf.file_type
+        FROM milestones m
+        JOIN media_files mf ON m.media_filename = mf.filename
+        ORDER BY mf.date DESC, mf.time DESC
+    ''').fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_milestones_by_filename(filename):
+    """获取某张照片关联的所有重要时刻"""
+    db = get_db()
+    rows = db.execute('''
+        SELECT id, media_filename, title, description, created_at
+        FROM milestones
+        WHERE media_filename = ?
+        ORDER BY created_at DESC
+    ''', (filename,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def add_milestone(data):
+    """添加重要时刻
+    data: {media_filename, title, description}
+    """
+    db = get_db()
+    db.execute('''
+        INSERT INTO milestones (media_filename, title, description)
+        VALUES (?, ?, ?)
+        ON CONFLICT(media_filename, title) DO UPDATE SET
+            description = excluded.description,
+            created_at = CURRENT_TIMESTAMP
+    ''', (data['media_filename'], data['title'], data.get('description')))
+    db.commit()
+
+
+def delete_milestone(id):
+    """删除重要时刻"""
+    db = get_db()
+    db.execute('DELETE FROM milestones WHERE id = ?', (id,))
+    db.commit()
+
+
+def get_milestone(id):
+    """获取单个重要时刻详情"""
+    db = get_db()
+    row = db.execute('''
+        SELECT m.id, m.media_filename, m.title, m.description, m.created_at,
+               mf.date, mf.time, mf.file_type
+        FROM milestones m
+        JOIN media_files mf ON m.media_filename = mf.filename
+        WHERE m.id = ?
+    ''', (id,)).fetchone()
+    return dict(row) if row else None
