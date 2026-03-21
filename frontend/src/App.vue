@@ -3,7 +3,7 @@
     <div class="app-container">
       <router-view />
     </div>
-    
+
     <!-- 底部 Tab Bar -->
     <div class="tab-bar">
       <div class="tab-bar-inner">
@@ -11,21 +11,21 @@
           <span class="tab-icon">📊</span>
           <span class="tab-label">成长曲线</span>
         </button>
-        
+
         <button class="tab-item add" @click="showActionSheet = true">
           <div class="add-btn">
             <span class="add-icon">+</span>
           </div>
           <span class="tab-label">记录</span>
         </button>
-        
+
         <button class="tab-item" :class="{ active: currentTab === 'photos' }" @click="scrollToPhotos">
           <span class="tab-icon">🖼️</span>
           <span class="tab-label">相册</span>
         </button>
       </div>
     </div>
-    
+
     <!-- 动作面板 -->
     <Teleport to="body">
       <Transition name="fade">
@@ -52,7 +52,7 @@
         </div>
       </Transition>
     </Teleport>
-    
+
     <!-- 全局弹窗 -->
     <BabyModal />
     <GrowthModal />
@@ -125,7 +125,7 @@ function openGrowth(type) {
     background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 25%, #fae8ff 50%, #fde2e4 75%, #fce7f3 100%);
     padding: 40px 20px;
   }
-  
+
   .app-container {
     max-width: 680px;
     background: var(--bg);

@@ -10,36 +10,36 @@ export const useModalStore = defineStore('modal', () => {
   const allPhotos = ref(false)
   const dayPhotos = ref(false)
   const dayPhotosData = ref(null)
-  
+
   // 重要时刻编辑器
   const milestoneEditor = ref(false)
   const milestoneEditorPhoto = ref(null)
-  
+
   function openPhotoViewer(index) {
     photoViewerIndex.value = index
     photoViewer.value = true
   }
-  
+
   function openDayPhotos(date, photos) {
     dayPhotosData.value = { date, photos }
     dayPhotos.value = true
   }
-  
+
   function openGrowth(type) {
     growthType.value = type
     growth.value = true
   }
-  
+
   function openMilestoneEditor(photo) {
     milestoneEditorPhoto.value = photo
     milestoneEditor.value = true
   }
-  
+
   function closeMilestoneEditor() {
     milestoneEditor.value = false
     milestoneEditorPhoto.value = null
   }
-  
+
   return {
     baby,
     growth,

@@ -4,38 +4,38 @@
       <div v-if="modalStore.photoViewer" class="viewer-overlay" @click.self="close">
         <button class="nav-btn prev" @click.stop="prev" v-if="canPrev">‹</button>
         <button class="nav-btn next" @click.stop="next" v-if="canNext">›</button>
-        
+
         <button class="close-btn" @click="close">✕</button>
-        
+
         <div class="viewer-content">
           <div v-if="loadError" class="load-error">
             <span>{{ loadError }}</span>
           </div>
-          
+
           <div v-else-if="loading" class="loading">
             <div class="spinner"></div>
             <span>加载中...</span>
           </div>
-          
+
           <!-- 显示中等质量预览图（已预生成） -->
-          <img v-if="currentPhoto?.type === 'photo'" 
-               :src="previewUrl" 
+          <img v-if="currentPhoto?.type === 'photo'"
+               :src="previewUrl"
                @load="loading = false"
                class="preview-image" />
-          
+
           <!-- 支持的视频格式：显示video播放器 -->
-          <video v-else-if="currentPhoto?.type === 'video' && isSupportedVideoFormat" 
-                 :src="videoUrl" 
-                 controls 
+          <video v-else-if="currentPhoto?.type === 'video' && isSupportedVideoFormat"
+                 :src="videoUrl"
+                 controls
                  playsinline
                  @canplay="onVideoSuccess"
                  @loadedmetadata="onVideoSuccess"
                  @error="onVideoError"
                  style="max-width: 90vw; max-height: 70vh;" />
-          
+
           <!-- 不支持的视频格式：显示缩略图 -->
           <div v-else-if="currentPhoto?.type === 'video' && !isSupportedVideoFormat" class="unsupported-video">
-            <img :src="previewUrl" 
+            <img :src="previewUrl"
                  @load="loading = false"
                  class="preview-image" />
             <div class="video-overlay">
@@ -44,7 +44,7 @@
             </div>
           </div>
         </div>
-        
+
         <!-- 已有关联时刻 -->
         <div v-if="milestones.length > 0" class="milestones-bar">
           <div class="milestone-tags">
@@ -53,7 +53,7 @@
             </span>
           </div>
         </div>
-        
+
         <!-- 底部信息栏 -->
         <div class="viewer-actions">
           <div class="bottom-bar">
@@ -61,17 +61,17 @@
             <div class="nav-info">
               <span class="photo-index">{{ currentIndex + 1 }} / {{ store.photos.length }}</span>
             </div>
-            
+
             <!-- 中间：拍摄时间 -->
             <div v-if="currentPhoto?.date || currentPhoto?.time" class="photo-datetime">
               <span v-if="currentPhoto?.date">📅 {{ currentPhoto.date }}</span>
               <span v-if="currentPhoto?.time">🕒 {{ currentPhoto.time }}</span>
             </div>
-            
+
             <!-- 右侧操作按钮组 -->
             <div class="action-buttons">
               <!-- 标记时刻按钮 -->
-              <button 
+              <button
                 class="action-btn milestone-btn"
                 @click="openMilestoneEditor"
                 :class="{ 'has-milestone': milestones.length > 0 }"
@@ -79,9 +79,9 @@
                 <span class="btn-icon">⭐</span>
                 <span class="btn-text">标记</span>
               </button>
-              
+
               <!-- 下载按钮 -->
-              <button 
+              <button
                 class="action-btn download-btn"
                 @click="downloadOriginal"
                 :disabled="isDownloading || isOversized"
@@ -152,12 +152,12 @@ const isLivp = computed(() => {
 // 检测视频格式是否被浏览器支持
 const isSupportedVideoFormat = computed(() => {
   if (!currentPhoto.value || currentPhoto.value.type !== 'video') return false
-  
+
   const filename = currentPhoto.value.name.toLowerCase()
-  
+
   // 浏览器通常支持的格式（包括预提取的 .mov 文件）
   const supportedFormats = ['.mp4', '.webm', '.ogg', '.mov', '.livp']
-  
+
   return supportedFormats.some(ext => filename.endsWith(ext))
 })
 
@@ -204,11 +204,11 @@ async function loadMilestones() {
 function updatePhotoURL() {
   if (currentPhoto.value) {
     // 只更新 query 参数，保留当前路径和其他参数
-    router.replace({ 
-      query: { 
+    router.replace({
+      query: {
         ...route.query,
         photo: currentPhoto.value.name
-      } 
+      }
     })
   }
 }
@@ -221,13 +221,13 @@ function openMilestoneEditor() {
 // 下载原文件
 async function downloadOriginal() {
   if (!currentPhoto.value || isDownloading.value || isOversized.value) return
-  
+
   isDownloading.value = true
-  
+
   try {
     const filename = encodeURIComponent(currentPhoto.value.name)
     const downloadUrl = `/api/download/${filename}`
-    
+
     // 使用 a 标签触发下载
     const a = document.createElement('a')
     a.href = downloadUrl
@@ -236,7 +236,7 @@ async function downloadOriginal() {
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    
+
   } catch (error) {
     console.error('Download error:', error)
     alert('下载失败，请稍后重试')
@@ -250,15 +250,15 @@ async function downloadOriginal() {
 
 async function loadPhoto() {
   if (!modalStore.photoViewer || !currentPhoto.value) return
-  
+
   loading.value = true
   loadError.value = ''
   previewUrl.value = ''
   videoUrl.value = ''
-  
+
   // 加载关联的时刻
   await loadMilestones()
-  
+
   if (currentPhoto.value.type === 'photo') {
     // 直接显示中等质量预览图（已预生成）
     previewUrl.value = `/preview/${encodeURIComponent(currentPhoto.value.name)}`
@@ -313,7 +313,7 @@ function close() {
   videoUrl.value = ''
   loadError.value = ''
   milestones.value = []
-  
+
   // 清除 URL 中的 photo 参数（仅在非管理页面）
   if (route.query.photo && !route.path.includes('/milestones/manage')) {
     const { photo, ...otherQuery } = route.query

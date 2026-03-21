@@ -7,7 +7,7 @@
             <h3>{{ formatDate(modalStore.dayPhotosData?.date) }} ({{ modalStore.dayPhotosData?.photos.length }}张)</h3>
             <button class="close-btn" @click="modalStore.dayPhotos = false">✕</button>
           </div>
-          
+
           <div class="photos-container">
             <div class="photos-grid">
               <div v-for="photo in paginatedPhotos" :key="photo.name"
@@ -18,7 +18,7 @@
               </div>
             </div>
           </div>
-          
+
           <div class="pagination" v-if="totalPages > 1">
             <button class="page-btn" :disabled="currentPage === 1" @click="currentPage--">上一页</button>
             <span class="page-info">{{ currentPage }} / {{ totalPages }}</span>

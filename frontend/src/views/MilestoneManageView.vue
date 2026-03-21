@@ -8,14 +8,14 @@
       <h1>管理重要时刻</h1>
       <span class="count-badge">共 {{ allMilestones.length }} 个</span>
     </div>
-    
+
     <div class="manage-body">
       <!-- 左侧：时间线选择器 -->
       <div class="timeline-sidebar">
         <h3>选择时间</h3>
         <div class="month-list">
-          <div 
-            v-for="month in availableMonths" 
+          <div
+            v-for="month in availableMonths"
             :key="month.key"
             class="month-item"
             :class="{ active: selectedMonth === month.key }"
@@ -28,22 +28,22 @@
           </div>
         </div>
       </div>
-      
+
       <!-- 右侧：照片网格 -->
       <div class="photos-content">
         <div v-if="loading" class="loading-state">
           <div class="spinner"></div>
           <span>加载中...</span>
         </div>
-        
+
         <div v-else-if="photos.length === 0" class="empty-state">
           <span class="empty-icon">📷</span>
           <span>该月暂无照片</span>
         </div>
-        
+
         <div v-else class="photos-grid">
-          <div 
-            v-for="photo in photos" 
+          <div
+            v-for="photo in photos"
             :key="photo.name"
             class="photo-card"
             :class="{ 'has-milestone': getPhotoMilestones(photo.name).length > 0 }"
@@ -51,12 +51,12 @@
           >
             <img :src="`/thumb/${encodeURIComponent(photo.name)}`" loading="lazy" />
             <div v-if="photo.type === 'video'" class="video-badge">▶</div>
-            
+
             <!-- 已标记指示器 -->
             <div v-if="getPhotoMilestones(photo.name).length > 0" class="milestone-indicator">
               <span>⭐ {{ getPhotoMilestones(photo.name).length }}</span>
             </div>
-            
+
             <!-- 悬浮提示 -->
             <div class="photo-overlay">
               <span class="overlay-text">
@@ -67,7 +67,7 @@
         </div>
       </div>
     </div>
-    
+
     <!-- 编辑弹窗 -->
     <Teleport to="body">
       <Transition name="fade">
@@ -77,31 +77,31 @@
               <h3>{{ editorPhoto ? '编辑时刻' : '标记时刻' }}</h3>
               <button class="close-btn" @click="closeEditor">✕</button>
             </div>
-            
+
             <div class="editor-body">
               <div class="photo-preview">
-                <img 
-                  v-if="editorPhoto" 
+                <img
+                  v-if="editorPhoto"
                   :src="`/preview/${encodeURIComponent(editorPhoto.name)}`"
                 />
               </div>
-              
+
               <!-- 新增时刻表单 -->
               <div class="add-milestone-form">
-                <input 
+                <input
                   v-model="newTitle"
-                  type="text" 
+                  type="text"
                   placeholder="输入时刻标题，如：第一次打疫苗"
                   maxlength="50"
                   @keyup.enter="addMilestone"
                 />
-                <textarea 
+                <textarea
                   v-model="newDescription"
                   placeholder="添加描述（可选）"
                   maxlength="200"
                   rows="2"
                 ></textarea>
-                <button 
+                <button
                   class="add-btn"
                   @click="addMilestone"
                   :disabled="!newTitle.trim() || adding"
@@ -110,13 +110,13 @@
                   <span v-else>+ 添加时刻</span>
                 </button>
               </div>
-              
+
               <!-- 已有时刻列表 -->
               <div v-if="editorMilestones.length > 0" class="existing-list">
                 <h4>已标记的时刻</h4>
                 <div class="milestone-items">
-                  <div 
-                    v-for="ms in editorMilestones" 
+                  <div
+                    v-for="ms in editorMilestones"
                     :key="ms.id"
                     class="milestone-item"
                   >
@@ -124,7 +124,7 @@
                       <span class="item-title">⭐ {{ ms.title }}</span>
                       <span v-if="ms.description" class="item-desc">{{ ms.description }}</span>
                     </div>
-                    <button 
+                    <button
                       class="delete-btn"
                       @click="deleteMilestone(ms.id)"
                       :disabled="deleting === ms.id"
@@ -176,9 +176,9 @@ async function initAvailableMonths() {
     // 获取所有已处理的媒体文件
     const res = await fetch(`${API_BASE}/album`)
     if (!res.ok) return
-    
+
     const allPhotos = await res.json()
-    
+
     // 提取所有有照片的月份
     const monthsSet = new Set()
     Object.keys(allPhotos).forEach(date => {
@@ -187,10 +187,10 @@ async function initAvailableMonths() {
         monthsSet.add(monthKey)
       }
     })
-    
+
     // 转换为数组并排序（最新的在前）
     const sortedMonths = Array.from(monthsSet).sort().reverse()
-    
+
     // 构建月份对象
     const months = sortedMonths.map(key => {
       const [year, month] = key.split('-')
@@ -202,9 +202,9 @@ async function initAvailableMonths() {
         milestoneCount: 0
       }
     })
-    
+
     availableMonths.value = months
-    
+
     // 默认选中第一个（最新的）
     if (months.length > 0) {
       selectedMonth.value = months[0].key
@@ -235,7 +235,7 @@ async function fetchAllMilestones() {
     const res = await fetch(`${API_BASE}/milestones`)
     if (res.ok) {
       allMilestones.value = await res.json()
-      
+
       // 按照片分组
       const grouped = {}
       allMilestones.value.forEach(ms => {
@@ -245,7 +245,7 @@ async function fetchAllMilestones() {
         grouped[ms.media_filename].push(ms)
       })
       milestonesByPhoto.value = grouped
-      
+
       updateMonthCounts()
     }
   } catch (e) {
@@ -267,7 +267,7 @@ async function loadMonthPhotos(year, month) {
     const res = await fetch(`${API_BASE}/album/${year}/${month}`)
     if (res.ok) {
       const dateGroups = await res.json()
-      
+
       // 按日期排序，展开为数组
       const sortedDates = Object.keys(dateGroups).sort().reverse()
       let allPhotos = []
@@ -291,7 +291,7 @@ async function openEditor(photo) {
   editorVisible.value = true
   newTitle.value = ''
   newDescription.value = ''
-  
+
   // 加载已有关联时刻
   try {
     const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(photo.name)}`)
@@ -311,7 +311,7 @@ function closeEditor() {
 
 async function addMilestone() {
   if (!newTitle.value.trim() || !editorPhoto.value) return
-  
+
   adding.value = true
   try {
     const res = await fetch(`${API_BASE}/milestones`, {
@@ -323,7 +323,7 @@ async function addMilestone() {
         description: newDescription.value.trim() || null
       })
     })
-    
+
     if (res.ok) {
       newTitle.value = ''
       newDescription.value = ''
@@ -349,7 +349,7 @@ async function deleteMilestone(id) {
     const res = await fetch(`${API_BASE}/milestones/${id}`, {
       method: 'DELETE'
     })
-    
+
     if (res.ok) {
       await openEditor(editorPhoto.value)
       await fetchAllMilestones()

@@ -6,18 +6,18 @@
         <span>📝 管理</span>
       </router-link>
     </div>
-    
+
     <div class="timeline-scroll">
       <div class="timeline-container">
-        <div 
-          v-for="milestone in milestones" 
+        <div
+          v-for="milestone in milestones"
           :key="milestone.id"
           class="milestone-card"
           @click="openMilestone(milestone)"
         >
           <div class="milestone-thumb">
-            <img 
-              :src="`/thumb/${encodeURIComponent(milestone.media_filename)}`" 
+            <img
+              :src="`/thumb/${encodeURIComponent(milestone.media_filename)}`"
               loading="lazy"
             />
             <span v-if="milestone.file_type === 'video'" class="video-badge">▶</span>
@@ -33,7 +33,7 @@
       </div>
     </div>
   </section>
-  
+
   <!-- 空状态 - 提示用户可以标记时刻 -->
   <section class="milestone-section empty" v-else>
     <div class="section-header">
@@ -87,7 +87,7 @@ function formatDate(dateStr) {
 function openMilestone(milestone) {
   // 找到对应的照片索引
   const photoIndex = store.photos.findIndex(p => p.name === milestone.media_filename)
-  
+
   if (photoIndex !== -1) {
     // 照片在当前月份，直接打开
     modalStore.openPhotoViewer(photoIndex)
@@ -310,7 +310,7 @@ function openMilestone(milestone) {
   .milestone-card {
     width: 160px;
   }
-  
+
   .timeline-scroll {
     margin: 0 -24px;
     padding: 0 24px;

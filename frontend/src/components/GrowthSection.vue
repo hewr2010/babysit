@@ -3,7 +3,7 @@
     <div class="section-header">
       <h2 class="section-title">成长记录</h2>
     </div>
-    
+
     <div v-if="store.growthRecords.length > 0" class="growth-content">
       <!-- 最新数据卡片 -->
       <div class="growth-cards">
@@ -13,14 +13,14 @@
           <div class="growth-label">{{ item.label }}</div>
         </div>
       </div>
-      
+
       <!-- 生长曲线 -->
       <div class="chart-wrapper">
         <div class="chart-container">
           <v-chart v-if="chartOption" :option="chartOption" autoresize @click="handleChartClick" />
         </div>
       </div>
-      
+
       <!-- 记录列表（点击图表点显示） -->
       <div v-if="selectedDate && recordsForDate.length > 0" class="history-section">
         <h3 class="history-title">{{ selectedDate }} 记录</h3>
@@ -45,7 +45,7 @@
         <span class="empty-hint">{{ selectedDate }} 无记录</span>
       </div>
     </div>
-    
+
     <div v-else class="empty-state">
       <span class="empty-icon">📏</span>
       <span>暂无记录</span>
@@ -98,28 +98,28 @@ const metricsByType = computed(() => {
     height: [],
     weight: []
   }
-  
+
   store.growthRecords.forEach(record => {
     if (record.metric_type && grouped[record.metric_type]) {
       grouped[record.metric_type].push(record)
     }
   })
-  
+
   return grouped
 })
 
 // 最新数据卡片
 const latestGrowth = computed(() => {
   return [
-    { 
-      label: '身高', 
-      value: metricsByType.value.height[0]?.value || '-', 
-      unit: 'cm' 
+    {
+      label: '身高',
+      value: metricsByType.value.height[0]?.value || '-',
+      unit: 'cm'
     },
-    { 
-      label: '体重', 
-      value: metricsByType.value.weight[0]?.value || '-', 
-      unit: 'g' 
+    {
+      label: '体重',
+      value: metricsByType.value.weight[0]?.value || '-',
+      unit: 'g'
     }
   ]
 })
@@ -146,16 +146,16 @@ const chartOption = computed(() => {
   // 身高和体重各自用独立的日期轴，不混在一起
   const heightRecords = metricsByType.value.height.slice().reverse() // 按日期升序
   const weightRecords = metricsByType.value.weight.slice().reverse()
-  
+
   // 获取所有日期用于 x 轴（合并去重排序）
   const heightDates = heightRecords.map(r => r.date)
   const weightDates = weightRecords.map(r => r.date)
   const allDates = [...new Set([...heightDates, ...weightDates])].sort()
-  
+
   // 构建系列数据 - 每个指标只在自己的日期上有值
   const series = []
   const legendData = []
-  
+
   // 计算身高数据的最小/最大值用于 Y 轴范围
   let heightMin = null, heightMax = null
   if (heightRecords.length > 0) {
@@ -165,7 +165,7 @@ const chartOption = computed(() => {
       heightMax = Math.max(...heightValues)
     }
   }
-  
+
   // 计算体重数据的最小/最大值用于 Y 轴范围
   let weightMin = null, weightMax = null
   if (weightRecords.length > 0) {
@@ -175,14 +175,14 @@ const chartOption = computed(() => {
       weightMax = Math.max(...weightValues)
     }
   }
-  
+
   if (heightRecords.length > 0) {
     // 身高数据：只在自己有的日期上显示，其他日期用 null
     const heightData = allDates.map(date => {
       const record = heightRecords.find(r => r.date === date)
       return record ? record.value : null
     })
-    
+
     series.push({
       name: '身高(cm)',
       type: 'line',
@@ -196,14 +196,14 @@ const chartOption = computed(() => {
     })
     legendData.push('身高(cm)')
   }
-  
+
   if (weightRecords.length > 0) {
     // 体重数据：只在自己有的日期上显示，其他日期用 null
     const weightData = allDates.map(date => {
       const record = weightRecords.find(r => r.date === date)
       return record ? record.value : null
     })
-    
+
     series.push({
       name: '体重(g)',
       type: 'line',
@@ -217,10 +217,10 @@ const chartOption = computed(() => {
     })
     legendData.push('体重(g)')
   }
-  
+
   // 构建 Y 轴配置，根据实际数据范围设置 min/max
   const yAxis = []
-  
+
   if (heightMin !== null && heightMax !== null) {
     const heightPadding = (heightMax - heightMin) * 0.1 || 1 // 10% 的边距，避免数据贴边
     yAxis.push({
@@ -234,7 +234,7 @@ const chartOption = computed(() => {
       splitLine: { show: false }
     })
   }
-  
+
   if (weightMin !== null && weightMax !== null) {
     const weightPadding = (weightMax - weightMin) * 0.1 || 10
     yAxis.push({
@@ -248,7 +248,7 @@ const chartOption = computed(() => {
       splitLine: { show: false }
     })
   }
-  
+
   return {
     tooltip: {
       trigger: 'axis',

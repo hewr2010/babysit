@@ -7,12 +7,12 @@
       <PhotoSection />
     </main>
     <div class="safe-area"></div>
-    
+
     <!-- 备案号 -->
     <footer class="beian-footer">
-      <a 
-        href="https://beian.miit.gov.cn/" 
-        target="_blank" 
+      <a
+        href="https://beian.miit.gov.cn/"
+        target="_blank"
         rel="noopener noreferrer"
         class="beian-link"
       >
@@ -40,7 +40,7 @@ const router = useRouter()
 // 打开指定照片
 async function openPhotoByFilename(filename) {
   if (!filename) return
-  
+
   // 处理 URL 编码：先替换 + 为空格，再解码
   let decodedFilename = filename
   try {
@@ -52,19 +52,19 @@ async function openPhotoByFilename(filename) {
   } catch (e) {
     decodedFilename = filename.replace(/\+/g, ' ')
   }
-  
+
   // 从文件名解析日期 (支持 YYYY-MM-DD 或 YYYYMMDD 格式)
   const dateMatch = decodedFilename.match(/(\d{4})[-]?(\d{2})[-]?(\d{2})/)
   if (dateMatch) {
     const year = parseInt(dateMatch[1])
     const month = parseInt(dateMatch[2])
-    
+
     // 使用 setMonth 设置年月并加载照片
     store.setMonth(year, month, false)
-    
+
     // 等待照片加载完成
     await new Promise(resolve => setTimeout(resolve, 500))
-    
+
     // 查找照片索引
     const index = store.photos.findIndex(p => p.name === decodedFilename)
     if (index !== -1) {
@@ -82,11 +82,11 @@ onMounted(async () => {
     if (match) {
       store.setMonth(parseInt(match[1]), parseInt(match[2]), false)
     }
-    
+
     // 加载基础数据
     await store.fetchBaby()
     await store.fetchGrowth()
-    
+
     // 等待照片加载后再打开
     await store.fetchPhotos()
     await openPhotoByFilename(route.query.photo)
@@ -148,20 +148,20 @@ watch(() => route.query.photo, (newPhoto) => {
     background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 25%, #fae8ff 50%, #fde2e4 75%, #fce7f3 100%);
     padding: 40px 20px;
   }
-  
+
   .main-content {
     padding: 0 24px;
   }
-  
+
   .safe-area {
     display: none;
   }
-  
+
   .beian-footer {
     padding: 20px 24px 24px;
     margin-top: 0;
   }
-  
+
   .beian-link {
     font-size: 12px;
   }

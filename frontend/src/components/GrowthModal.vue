@@ -12,34 +12,34 @@
               <label>日期 <span class="required">*</span></label>
               <input v-model="form.date" type="date" required />
             </div>
-            
+
             <!-- 身高输入 -->
             <div v-if="modalStore.growthType === 'height'" class="form-group">
               <label>身高 (cm) <span class="required">*</span></label>
-              <input 
+              <input
                 ref="inputRef"
-                v-model="form.value" 
-                type="number" 
-                step="0.1" 
+                v-model="form.value"
+                type="number"
+                step="0.1"
                 placeholder="例如: 52.5"
                 required
               />
             </div>
-            
+
             <!-- 体重输入 -->
             <div v-if="modalStore.growthType === 'weight'" class="form-group">
               <label>体重 (g) <span class="required">*</span></label>
-              <input 
+              <input
                 ref="inputRef"
-                v-model="form.value" 
-                type="number" 
+                v-model="form.value"
+                type="number"
                 step="1"
                 min="0"
                 placeholder="例如: 3500"
                 required
               />
             </div>
-            
+
             <button type="submit" class="submit-btn">保存</button>
           </form>
         </div>
@@ -71,7 +71,7 @@ watch(() => modalStore.growth, (val) => {
   if (val) {
     form.date = dayjs().format('YYYY-MM-DD')
     form.value = ''
-    
+
     // 自动聚焦输入框
     nextTick(() => {
       if (inputRef.value) {
@@ -90,15 +90,15 @@ function handleSubmit() {
     alert('请输入数值')
     return
   }
-  
+
   const data = { date: form.date }
-  
+
   if (modalStore.growthType === 'height') {
     data.height = parseFloat(form.value)
   } else if (modalStore.growthType === 'weight') {
     data.weight = parseInt(form.value)
   }
-  
+
   store.addGrowth(data)
   close()
 }

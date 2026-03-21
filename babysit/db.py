@@ -34,7 +34,7 @@ def init_db():
     """初始化数据库表"""
     db = sqlite3.connect(DB_PATH)
     _configure_connection(db)
-    
+
     db.execute('''
         CREATE TABLE IF NOT EXISTS baby (
             id INTEGER PRIMARY KEY,
@@ -44,7 +44,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
     db.execute('''
         CREATE TABLE IF NOT EXISTS records (
             id INTEGER PRIMARY KEY,
@@ -57,7 +57,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
     db.execute('''
         CREATE TABLE IF NOT EXISTS growth (
             id INTEGER PRIMARY KEY,
@@ -67,7 +67,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    
+
     # 媒体文件表 - 用于存储已预处理的媒体文件信息
     db.execute('''
         CREATE TABLE IF NOT EXISTS media_files (
@@ -86,7 +86,7 @@ def init_db():
             UNIQUE(filename)
         )
     ''')
-    
+
     # 创建索引以优化查询性能
     db.execute('''
         CREATE INDEX IF NOT EXISTS idx_media_date ON media_files(date DESC)
@@ -94,7 +94,7 @@ def init_db():
     db.execute('''
         CREATE INDEX IF NOT EXISTS idx_media_processed ON media_files(processed, date DESC)
     ''')
-    
+
     # 重要时刻表 - 标记照片的重要时刻
     db.execute('''
         CREATE TABLE IF NOT EXISTS milestones (
@@ -113,7 +113,7 @@ def init_db():
     db.execute('''
         CREATE INDEX IF NOT EXISTS idx_milestones_created ON milestones(created_at DESC)
     ''')
-    
+
     # 初始化默认宝宝信息（青青）
     cursor = db.execute("SELECT COUNT(*) FROM baby")
     if cursor.fetchone()[0] == 0:
@@ -122,7 +122,7 @@ def init_db():
             ("青青", "2026-02-12", "女")
         )
         print("✓ 已初始化宝宝信息: 青青, 女, 2026-02-12")
-    
+
     db.commit()
     db.close()
 
@@ -158,20 +158,20 @@ def add_growth(data):
     """添加成长记录 (支持单个或多个指标)"""
     db = get_db()
     date = data['date']
-    
+
     # 分别添加每个指标
     if data.get('height'):
         db.execute(
             "INSERT INTO growth (date, metric_type, value) VALUES (?, ?, ?)",
             (date, 'height', float(data['height']))
         )
-    
+
     if data.get('weight'):
         db.execute(
             "INSERT INTO growth (date, metric_type, value) VALUES (?, ?, ?)",
             (date, 'weight', float(data['weight']))
         )
-    
+
     db.commit()
 
 
@@ -197,7 +197,7 @@ def update_media_file(db, file_info):
     参数 db 是已建立的数据库连接
     """
     db.execute('''
-        INSERT INTO media_files 
+        INSERT INTO media_files
         (filename, file_type, file_size, md5, date, time, baidu_date, processed, processed_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(filename) DO UPDATE SET

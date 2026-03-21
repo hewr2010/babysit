@@ -4,7 +4,7 @@
       <div class="spinner"></div>
       <span>正在加载照片...</span>
     </div>
-    
+
     <div v-else-if="error" class="error-state">
       <span class="error-icon">😕</span>
       <span class="error-title">{{ error }}</span>
@@ -32,27 +32,27 @@ const error = ref('')
 
 onMounted(async () => {
   const filename = decodeURIComponent(route.params.filename)
-  
+
   if (!filename) {
     error.value = '照片链接无效'
     loading.value = false
     return
   }
-  
+
   // 从文件名解析日期
   // 文件名格式: IMG_YYYYMMDD_HHMMSS.jpg 或类似格式
   const dateMatch = filename.match(/(\d{4})(\d{2})(\d{2})/)
-  
+
   if (!dateMatch) {
     error.value = '无法识别照片日期'
     loading.value = false
     return
   }
-  
+
   const year = parseInt(dateMatch[1])
   const month = parseInt(dateMatch[2])
   const day = parseInt(dateMatch[3])
-  
+
   // 验证日期有效性
   const photoDate = dayjs(`${year}-${month}-${day}`)
   if (!photoDate.isValid()) {
@@ -60,32 +60,32 @@ onMounted(async () => {
     loading.value = false
     return
   }
-  
+
   // 切换到对应月份
   store.setMonth(year, month)
-  
+
   // 等待照片加载
   await store.fetchPhotos()
-  
+
   // 查找照片索引
   const photoIndex = store.photos.findIndex(p => p.name === filename)
-  
+
   if (photoIndex === -1) {
     // 照片可能还在处理中，或者已被删除
     error.value = '照片未找到，可能正在处理中'
     loading.value = false
-    
+
     // 3秒后自动跳转到对应月份
     setTimeout(() => {
       router.replace(`/${year}/${month}`)
     }, 3000)
     return
   }
-  
+
   // 打开照片查看器
   loading.value = false
   modalStore.openPhotoViewer(photoIndex)
-  
+
   // 替换 URL 为普通月份页面 URL
   router.replace(`/${year}/${month}`)
 })

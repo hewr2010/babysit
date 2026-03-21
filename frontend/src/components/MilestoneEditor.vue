@@ -7,30 +7,30 @@
             <h3>⭐ 标记重要时刻</h3>
             <button class="close-btn" @click="close">✕</button>
           </div>
-          
+
           <div class="editor-body">
             <div class="photo-preview">
-              <img 
-                v-if="photo" 
-                :src="`/thumb/${encodeURIComponent(photo.name)}`" 
+              <img
+                v-if="photo"
+                :src="`/thumb/${encodeURIComponent(photo.name)}`"
               />
             </div>
-            
+
             <div class="form-group">
               <label>时刻标题</label>
-              <input 
+              <input
                 v-model="title"
-                type="text" 
+                type="text"
                 placeholder="例如：第一次打疫苗"
                 maxlength="50"
                 @keyup.enter="save"
               />
               <span class="char-count">{{ title.length }}/50</span>
             </div>
-            
+
             <div class="form-group">
               <label>描述（可选）</label>
-              <textarea 
+              <textarea
                 v-model="description"
                 placeholder="添加更多细节..."
                 maxlength="200"
@@ -38,13 +38,13 @@
               ></textarea>
               <span class="char-count">{{ description.length }}/200</span>
             </div>
-            
+
             <!-- 已有时刻列表 -->
             <div v-if="existingMilestones.length > 0" class="existing-milestones">
               <label>已标记的时刻</label>
               <div class="milestone-list">
-                <div 
-                  v-for="ms in existingMilestones" 
+                <div
+                  v-for="ms in existingMilestones"
                   :key="ms.id"
                   class="milestone-tag"
                 >
@@ -54,11 +54,11 @@
               </div>
             </div>
           </div>
-          
+
           <div class="editor-footer">
             <button class="btn-secondary" @click="close">取消</button>
-            <button 
-              class="btn-primary" 
+            <button
+              class="btn-primary"
               @click="save"
               :disabled="!title.trim() || saving"
             >
@@ -111,7 +111,7 @@ async function fetchExistingMilestones() {
 
 async function save() {
   if (!title.value.trim() || !photo.value) return
-  
+
   saving.value = true
   try {
     const res = await fetch(`${API_BASE}/milestones`, {
@@ -123,7 +123,7 @@ async function save() {
         description: description.value.trim() || null
       })
     })
-    
+
     if (res.ok) {
       // 清空表单并刷新列表
       title.value = ''
@@ -145,12 +145,12 @@ async function save() {
 
 async function deleteMilestone(id) {
   if (!confirm('确定要删除这个时刻吗？')) return
-  
+
   try {
     const res = await fetch(`${API_BASE}/milestones/${id}`, {
       method: 'DELETE'
     })
-    
+
     if (res.ok) {
       await fetchExistingMilestones()
       window.dispatchEvent(new CustomEvent('milestone-updated'))

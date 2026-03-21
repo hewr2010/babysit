@@ -20,7 +20,7 @@
           <span class="day-count">{{ photos.length }}张</span>
         </div>
         <div class="photo-grid">
-          <div v-for="photo in photos.slice(0, 6)" :key="photo.name" 
+          <div v-for="photo in photos.slice(0, 6)" :key="photo.name"
                class="photo-item" :class="{ video: photo.type === 'video' }"
                @click="openPhoto(date, photo)">
             <img :src="`/thumb/${encodeURIComponent(photo.name)}`" loading="lazy" />

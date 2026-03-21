@@ -7,7 +7,7 @@
             <h3>{{ store.monthDisplay }}全部照片 ({{ store.photos.length }}张)</h3>
             <button class="close-btn" @click="modalStore.allPhotos = false">✕</button>
           </div>
-          
+
           <div class="photos-container">
             <div class="timeline">
               <div v-for="(photos, date) in sortedPhotosByDate" :key="date" class="timeline-day">
