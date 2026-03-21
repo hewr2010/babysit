@@ -2,9 +2,6 @@
   <section class="milestone-section" v-if="milestones.length > 0">
     <div class="section-header">
       <h2 class="section-title">⭐ 重要时刻 ({{ milestones.length }}个)</h2>
-      <router-link to="/milestones/manage" class="manage-link">
-        <span>📝 管理</span>
-      </router-link>
     </div>
 
     <div class="timeline-scroll">
@@ -38,9 +35,6 @@
   <section class="milestone-section empty" v-else>
     <div class="section-header">
       <h2 class="section-title">⭐ 重要时刻</h2>
-      <router-link to="/milestones/manage" class="manage-link">
-        📝 管理
-      </router-link>
     </div>
     <div class="empty-content">
       <div class="empty-hint">
