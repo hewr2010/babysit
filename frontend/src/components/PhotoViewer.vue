@@ -7,7 +7,10 @@
 
         <button class="close-btn" @click="close">✕</button>
 
-        <div class="viewer-content">
+        <div class="viewer-content"
+             @touchstart="handleTouchStart"
+             @touchmove="handleTouchMove"
+             @touchend="handleTouchEnd">
           <div v-if="loadError" class="load-error">
             <span>{{ loadError }}</span>
           </div>
@@ -343,6 +346,51 @@ function onVideoError(e) {
 function onVideoSuccess() {
   loading.value = false
   loadError.value = ''
+}
+
+// ========== 触摸手势处理 ==========
+const touchStartX = ref(0)
+const touchEndX = ref(0)
+const touchStartY = ref(0)
+const touchEndY = ref(0)
+const minSwipeDistance = 50  // 最小滑动距离阈值（像素）
+
+function handleTouchStart(e) {
+  touchStartX.value = e.changedTouches[0].screenX
+  touchStartY.value = e.changedTouches[0].screenY
+}
+
+function handleTouchMove(e) {
+  // 阻止默认滚动行为，让左右滑动不会被页面滚动干扰
+  const currentX = e.changedTouches[0].screenX
+  const currentY = e.changedTouches[0].screenY
+  const diffX = Math.abs(currentX - touchStartX.value)
+  const diffY = Math.abs(currentY - touchStartY.value)
+
+  // 只有当水平滑动距离大于垂直滑动距离时，才阻止默认行为
+  if (diffX > diffY && diffX > 10) {
+    e.preventDefault()
+  }
+}
+
+function handleTouchEnd(e) {
+  touchEndX.value = e.changedTouches[0].screenX
+  touchEndY.value = e.changedTouches[0].screenY
+
+  const diffX = touchEndX.value - touchStartX.value
+  const diffY = touchEndY.value - touchStartY.value
+
+  // 判断主要是水平滑动还是垂直滑动
+  if (Math.abs(diffX) > Math.abs(diffY)) {
+    // 水平滑动
+    if (diffX > minSwipeDistance) {
+      // 向右滑动 -> 上一张
+      prev()
+    } else if (diffX < -minSwipeDistance) {
+      // 向左滑动 -> 下一张
+      next()
+    }
+  }
 }
 </script>
 
