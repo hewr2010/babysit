@@ -2,6 +2,9 @@
   <section class="milestone-section" v-if="milestones.length > 0">
     <div class="section-header">
       <h2 class="section-title">⭐ 重要时刻 ({{ milestones.length }}个)</h2>
+      <router-link to="/milestones/manage" class="manage-link">
+        <span>📝 管理</span>
+      </router-link>
     </div>
 
     <div class="timeline-scroll">
@@ -111,6 +114,7 @@ function openMilestone(milestone) {
   padding: 20px;
   box-shadow: var(--shadow);
   margin-bottom: 16px;
+  overflow: hidden;
 }
 
 .milestone-section.empty {
@@ -206,7 +210,7 @@ function openMilestone(milestone) {
   scrollbar-width: none;
   -ms-overflow-style: none;
   margin: 0 -20px;
-  padding: 0 20px;
+  padding: 4px 20px;
 }
 
 .timeline-scroll::-webkit-scrollbar {
@@ -215,14 +219,15 @@ function openMilestone(milestone) {
 
 .timeline-container {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   padding-bottom: 4px;
+  width: fit-content;
 }
 
 /* 时刻卡片 */
 .milestone-card {
   flex-shrink: 0;
-  width: 140px;
+  width: 130px;
   background: var(--bg);
   border-radius: var(--radius);
   overflow: hidden;
@@ -268,7 +273,8 @@ function openMilestone(milestone) {
 }
 
 .milestone-info {
-  padding: 10px;
+  padding: 8px;
+  min-height: 0;
 }
 
 .milestone-date {
@@ -290,24 +296,38 @@ function openMilestone(milestone) {
 }
 
 .milestone-desc {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-tertiary);
-  margin-top: 4px;
+  margin-top: 2px;
   display: -webkit-box;
   -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-all;
 }
 
 /* PC端 */
 @media (min-width: 768px) {
   .milestone-card {
-    width: 160px;
+    width: 140px;
+  }
+  
+  .milestone-info {
+    padding: 10px;
+  }
+  
+  .milestone-desc {
+    font-size: 11px;
+    margin-top: 4px;
   }
 
   .timeline-scroll {
     margin: 0 -24px;
-    padding: 0 24px;
+    padding: 4px 24px;
+  }
+  
+  .timeline-container {
+    gap: 12px;
   }
 }
 </style>

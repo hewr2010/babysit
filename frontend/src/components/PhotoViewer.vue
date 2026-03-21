@@ -495,41 +495,55 @@ function onVideoSuccess() {
 /* 已有关联时刻 */
 .milestones-bar {
   position: absolute;
-  top: 80px;
+  top: 70px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 410;
   max-width: 90vw;
-  max-height: 30vh;
+  max-height: calc(70vh - 200px);
   overflow-y: auto;
+  padding: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+}
+
+.milestones-bar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.milestones-bar::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 2px;
 }
 
 .milestone-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
 }
 
 .milestone-item {
-  padding: 10px 16px;
+  padding: 8px 14px;
   background: rgba(236, 72, 153, 0.9);
   color: white;
-  border-radius: 12px;
+  border-radius: 10px;
   backdrop-filter: blur(8px);
   max-width: 80vw;
+  min-width: 120px;
+  text-align: center;
 }
 
 .milestone-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  margin-bottom: 4px;
 }
 
 .milestone-desc {
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.9;
-  line-height: 1.4;
+  line-height: 1.3;
+  margin-top: 2px;
 }
 
 /* 底部信息栏 */
