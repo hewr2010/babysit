@@ -2,51 +2,45 @@
   <Teleport to="body">
     <Transition name="fade">
       <div v-if="modalStore.photoViewer" class="viewer-overlay" @click.self="close">
-        <button class="nav-btn prev" @click.stop="prev" v-if="canPrev">‹</button>
-        <button class="nav-btn next" @click.stop="next" v-if="canNext">›</button>
-
         <button class="close-btn" @click="close">✕</button>
 
-        <div class="viewer-content"
+        <!-- 滑动相册容器 -->
+        <div class="viewer-wrapper"
              @touchstart="handleTouchStart"
              @touchmove="handleTouchMove"
              @touchend="handleTouchEnd">
-          <div v-if="loadError" class="load-error">
-            <span>{{ loadError }}</span>
-          </div>
-
-          <div v-else-if="loading" class="loading">
-            <div class="spinner"></div>
-            <span>加载中...</span>
-          </div>
-
-          <!-- 显示中等质量预览图（已预生成） -->
-          <img v-if="currentPhoto?.type === 'photo'"
-               :src="previewUrl"
-               @load="loading = false"
-               class="preview-image" />
-
-          <!-- 支持的视频格式：显示video播放器 -->
-          <video v-else-if="currentPhoto?.type === 'video' && isSupportedVideoFormat"
-                 :src="videoUrl"
-                 controls
-                 playsinline
-                 @canplay="onVideoSuccess"
-                 @loadedmetadata="onVideoSuccess"
-                 @error="onVideoError"
-                 style="max-width: 90vw; max-height: 70vh;" />
-
-          <!-- 不支持的视频格式：显示缩略图 -->
-          <div v-else-if="currentPhoto?.type === 'video' && !isSupportedVideoFormat" class="unsupported-video">
-            <img :src="previewUrl"
-                 @load="loading = false"
-                 class="preview-image" />
-            <div class="video-overlay">
-              <div class="video-icon">▶</div>
-              <div class="video-hint">不支持的视频格式 ({{ videoFormat }})</div>
+          <div class="viewer-track"
+               :class="{ 'is-animating': isAnimating }"
+               :style="trackStyle">
+            <!-- 上一张 -->
+            <div v-if="prevPhoto" class="slide prev-slide">
+              <SlideContent :photo="prevPhoto" />
             </div>
+            <div v-else class="slide empty-slide"></div>
+
+            <!-- 当前 -->
+            <div class="slide current-slide">
+              <div v-if="loadError" class="slide-error">
+                <span>{{ loadError }}</span>
+              </div>
+              <div v-else-if="loading && !currentPhoto?.type" class="slide-loading">
+                <div class="spinner"></div>
+                <span>加载中...</span>
+              </div>
+              <SlideContent v-else :photo="currentPhoto" :is-current="true" @loaded="loading = false" @error="onSlideError" />
+            </div>
+
+            <!-- 下一张 -->
+            <div v-if="nextPhoto" class="slide next-slide">
+              <SlideContent :photo="nextPhoto" />
+            </div>
+            <div v-else class="slide empty-slide"></div>
           </div>
         </div>
+
+        <!-- 左右导航按钮（桌面端显示） -->
+        <button class="nav-btn prev" @click.stop="navigatePrev" v-if="canPrev">‹</button>
+        <button class="nav-btn next" @click.stop="navigateNext" v-if="canNext">›</button>
 
         <!-- 已有关联时刻 -->
         <div v-if="milestones.length > 0" class="milestones-bar">
@@ -118,6 +112,7 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
+import SlideContent from './SlideContent.vue'
 
 const API_BASE = '/api'
 
@@ -128,13 +123,13 @@ const router = useRouter()
 
 const loading = ref(true)
 const loadError = ref('')
-const previewUrl = ref('')
-const videoUrl = ref('')
 const isDownloading = ref(false)
 const milestones = ref([])
 
 const currentIndex = computed(() => modalStore.photoViewerIndex)
 const currentPhoto = computed(() => store.photos[currentIndex.value])
+const prevPhoto = computed(() => store.photos[currentIndex.value - 1])
+const nextPhoto = computed(() => store.photos[currentIndex.value + 1])
 const canPrev = computed(() => currentIndex.value > 0)
 const canNext = computed(() => currentIndex.value < store.photos.length - 1)
 
@@ -151,26 +146,6 @@ const isOversized = computed(() => {
 const isLivp = computed(() => {
   if (!currentPhoto.value?.name) return false
   return currentPhoto.value.name.toLowerCase().endsWith('.livp')
-})
-
-// 检测视频格式是否被浏览器支持
-const isSupportedVideoFormat = computed(() => {
-  if (!currentPhoto.value || currentPhoto.value.type !== 'video') return false
-
-  const filename = currentPhoto.value.name.toLowerCase()
-
-  // 浏览器通常支持的格式（包括预提取的 .mov 文件）
-  const supportedFormats = ['.mp4', '.webm', '.ogg', '.mov', '.livp']
-
-  return supportedFormats.some(ext => filename.endsWith(ext))
-})
-
-// 获取视频格式名称
-const videoFormat = computed(() => {
-  if (!currentPhoto.value) return ''
-  const filename = currentPhoto.value.name
-  const ext = filename.substring(filename.lastIndexOf('.'))
-  return ext.toUpperCase()
 })
 
 // 格式化文件大小
@@ -207,7 +182,6 @@ async function loadMilestones() {
 // 更新 URL 为当前照片
 function updatePhotoURL() {
   if (currentPhoto.value) {
-    // 只更新 query 参数，保留当前路径和其他参数
     router.replace({
       query: {
         ...route.query,
@@ -232,7 +206,6 @@ async function downloadOriginal() {
     const filename = encodeURIComponent(currentPhoto.value.name)
     const downloadUrl = `/api/download/${filename}`
 
-    // 使用 a 标签触发下载
     const a = document.createElement('a')
     a.href = downloadUrl
     a.download = currentPhoto.value.name
@@ -245,62 +218,36 @@ async function downloadOriginal() {
     console.error('Download error:', error)
     alert('下载失败，请稍后重试')
   } finally {
-    // 短暂延迟后恢复按钮状态
     setTimeout(() => {
       isDownloading.value = false
     }, 500)
   }
 }
 
-async function loadPhoto() {
-  if (!modalStore.photoViewer || !currentPhoto.value) return
-
-  loading.value = true
-  loadError.value = ''
-  previewUrl.value = ''
-  videoUrl.value = ''
-
-  // 加载关联的时刻
-  await loadMilestones()
-
-  if (currentPhoto.value.type === 'photo') {
-    // 直接显示中等质量预览图（已预生成）
-    previewUrl.value = `/preview/${encodeURIComponent(currentPhoto.value.name)}`
-  } else if (currentPhoto.value.type === 'video') {
-    if (isSupportedVideoFormat.value) {
-      const filename = currentPhoto.value.name
-      const lowerName = filename.toLowerCase()
-      // .livp 文件使用已预提取的视频
-      if (lowerName.endsWith('.livp')) {
-        videoUrl.value = `/livp/${encodeURIComponent(filename)}`
-      } else if (lowerName.endsWith('.mov') || lowerName.endsWith('.mp4')) {
-        // .mov 和 .mp4 使用直链播放
-        videoUrl.value = `/video/${encodeURIComponent(filename)}`
-      } else {
-        // 其他视频格式：显示缩略图
-        previewUrl.value = `/preview/${encodeURIComponent(filename)}`
-      }
-      loading.value = false
-    } else {
-      // 不支持的视频格式：显示缩略图
-      previewUrl.value = `/preview/${encodeURIComponent(currentPhoto.value.name)}`
-    }
-  }
+function onSlideError(msg) {
+  loadError.value = msg
+  loading.value = false
 }
 
 // 监听查看器打开
 watch(() => modalStore.photoViewer, (val) => {
   if (val) {
-    loadPhoto()
+    loading.value = true
+    loadError.value = ''
+    loadMilestones()
     updatePhotoURL()
+    resetSwipeState()
   }
 })
 
 // 监听索引变化（左右切换）
 watch(() => modalStore.photoViewerIndex, () => {
   if (modalStore.photoViewer) {
-    loadPhoto()
+    loading.value = true
+    loadError.value = ''
+    loadMilestones()
     updatePhotoURL()
+    resetSwipeState()
   }
 })
 
@@ -313,84 +260,134 @@ window.addEventListener('milestone-updated', () => {
 
 function close() {
   modalStore.photoViewer = false
-  previewUrl.value = ''
-  videoUrl.value = ''
   loadError.value = ''
   milestones.value = []
 
-  // 清除 URL 中的 photo 参数（仅在非管理页面）
   if (route.query.photo && !route.path.includes('/milestones/manage')) {
     const { photo, ...otherQuery } = route.query
     router.replace({ query: otherQuery })
   }
 }
 
-function prev() {
-  if (canPrev.value) {
-    modalStore.photoViewerIndex--
+// ========== 滑动逻辑 ==========
+const SLIDE_WIDTH = 100 // 每个 slide 占 viewport 的百分比
+const THRESHOLD = 0.25 // 滑动超过 25% 就切换
+
+const trackOffset = ref(0) // 当前偏移量（百分比）
+const isDragging = ref(false)
+const isAnimating = ref(false)
+const startX = ref(0)
+const currentX = ref(0)
+
+const trackStyle = computed(() => {
+  // 初始位置是 -100%（显示中间的 current）
+  const baseOffset = -SLIDE_WIDTH
+  const totalOffset = baseOffset + trackOffset.value
+  return {
+    transform: `translateX(${totalOffset}%)`,
+    willChange: isDragging.value ? 'transform' : 'auto'
   }
-}
+})
 
-function next() {
-  if (canNext.value) {
-    modalStore.photoViewerIndex++
-  }
+function resetSwipeState() {
+  trackOffset.value = 0
+  isDragging.value = false
+  isAnimating.value = false
+  startX.value = 0
+  currentX.value = 0
 }
-
-function onVideoError(e) {
-  console.error('Video load error:', e)
-  loading.value = false
-  loadError.value = '视频加载失败，请稍后重试'
-}
-
-function onVideoSuccess() {
-  loading.value = false
-  loadError.value = ''
-}
-
-// ========== 触摸手势处理 ==========
-const touchStartX = ref(0)
-const touchEndX = ref(0)
-const touchStartY = ref(0)
-const touchEndY = ref(0)
-const minSwipeDistance = 50  // 最小滑动距离阈值（像素）
 
 function handleTouchStart(e) {
-  touchStartX.value = e.changedTouches[0].screenX
-  touchStartY.value = e.changedTouches[0].screenY
+  if (store.photos.length <= 1) return
+
+  isAnimating.value = false
+  isDragging.value = true
+  startX.value = e.touches[0].clientX
+  currentX.value = startX.value
 }
 
 function handleTouchMove(e) {
-  // 阻止默认滚动行为，让左右滑动不会被页面滚动干扰
-  const currentX = e.changedTouches[0].screenX
-  const currentY = e.changedTouches[0].screenY
-  const diffX = Math.abs(currentX - touchStartX.value)
-  const diffY = Math.abs(currentY - touchStartY.value)
+  if (!isDragging.value) return
 
-  // 只有当水平滑动距离大于垂直滑动距离时，才阻止默认行为
-  if (diffX > diffY && diffX > 10) {
-    e.preventDefault()
+  currentX.value = e.touches[0].clientX
+  const deltaX = currentX.value - startX.value
+
+  // 计算百分比偏移
+  const wrapperWidth = e.currentTarget.offsetWidth
+  let offsetPercent = (deltaX / wrapperWidth) * 100
+
+  // 边界限制：第一张不能往右滑，最后一张不能往左滑
+  if (!canPrev.value && offsetPercent > 0) {
+    offsetPercent = offsetPercent * 0.3 // 阻尼效果
+  } else if (!canNext.value && offsetPercent < 0) {
+    offsetPercent = offsetPercent * 0.3
   }
+
+  trackOffset.value = offsetPercent
 }
 
 function handleTouchEnd(e) {
-  touchEndX.value = e.changedTouches[0].screenX
-  touchEndY.value = e.changedTouches[0].screenY
+  if (!isDragging.value) return
 
-  const diffX = touchEndX.value - touchStartX.value
-  const diffY = touchEndY.value - touchStartY.value
+  isDragging.value = false
+  isAnimating.value = true
 
-  // 判断主要是水平滑动还是垂直滑动
-  if (Math.abs(diffX) > Math.abs(diffY)) {
-    // 水平滑动
-    if (diffX > minSwipeDistance) {
-      // 向右滑动 -> 上一张
-      prev()
-    } else if (diffX < -minSwipeDistance) {
-      // 向左滑动 -> 下一张
-      next()
+  const wrapperWidth = e.currentTarget.offsetWidth
+  const deltaX = currentX.value - startX.value
+  const deltaPercent = deltaX / wrapperWidth
+
+  // 判断是否要切换
+  let shouldSwitch = false
+  let direction = 0 // -1 = 下一张(左滑), 1 = 上一张(右滑)
+
+  if (Math.abs(deltaPercent) > THRESHOLD) {
+    if (deltaPercent < 0 && canNext.value) {
+      // 左滑 -> 下一张
+      shouldSwitch = true
+      direction = -1
+    } else if (deltaPercent > 0 && canPrev.value) {
+      // 右滑 -> 上一张
+      shouldSwitch = true
+      direction = 1
     }
   }
+
+  if (shouldSwitch) {
+    // 动画到完全切换的位置
+    trackOffset.value = direction * SLIDE_WIDTH
+
+    // 动画完成后更新索引
+    setTimeout(() => {
+      if (direction === 1) {
+        modalStore.photoViewerIndex--
+      } else {
+        modalStore.photoViewerIndex++
+      }
+      // 索引更新后会触发 watch，自动重置 trackOffset
+    }, 300)
+  } else {
+    // 回弹到原位
+    trackOffset.value = 0
+  }
+}
+
+// 按钮导航（带动画）
+function navigatePrev() {
+  if (!canPrev.value) return
+  isAnimating.value = true
+  trackOffset.value = SLIDE_WIDTH
+  setTimeout(() => {
+    modalStore.photoViewerIndex--
+  }, 300)
+}
+
+function navigateNext() {
+  if (!canNext.value) return
+  isAnimating.value = true
+  trackOffset.value = -SLIDE_WIDTH
+  setTimeout(() => {
+    modalStore.photoViewerIndex++
+  }, 300)
 }
 </script>
 
@@ -404,61 +401,44 @@ function handleTouchEnd(e) {
   align-items: center;
   justify-content: center;
   z-index: 400;
+  overflow: hidden;
 }
 
-.viewer-content {
-  max-width: 90vw;
-  max-height: 70vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.viewer-content img,
-.viewer-content video {
-  max-width: 90vw;
-  max-height: 70vh;
-  object-fit: contain;
-}
-
-.preview-image {
-  max-width: 90vw;
-  max-height: 70vh;
-}
-
-.unsupported-video {
+.viewer-wrapper {
   position: relative;
-  max-width: 90vw;
-  max-height: 70vh;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: pan-y;
 }
 
-.video-overlay {
-  position: absolute;
-  inset: 0;
+.viewer-track {
   display: flex;
-  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+}
+
+.viewer-track.is-animating {
+  transition: transform 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+.slide {
+  flex: 0 0 100%;
+  width: 100%;
+  height: 100%;
+  display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.4);
-  color: white;
+  padding: 80px 0 120px; /* 留出顶部关闭按钮和底部操作栏空间 */
+  box-sizing: border-box;
+}
+
+.empty-slide {
   pointer-events: none;
 }
 
-.video-icon {
-  font-size: 72px;
-  margin-bottom: 16px;
-  opacity: 0.9;
-}
-
-.video-hint {
-  font-size: 16px;
-  padding: 8px 16px;
-  background: rgba(0, 0, 0, 0.6);
-  border-radius: 8px;
-  opacity: 0.95;
-}
-
-.loading {
+.slide-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -466,7 +446,7 @@ function handleTouchEnd(e) {
   color: white;
 }
 
-.load-error {
+.slide-error {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -540,6 +520,13 @@ function handleTouchEnd(e) {
 .nav-btn.prev { left: 20px; }
 .nav-btn.next { right: 20px; }
 
+/* 移动端隐藏导航按钮 */
+@media (max-width: 768px) {
+  .nav-btn {
+    display: none;
+  }
+}
+
 /* 已有关联时刻 */
 .milestones-bar {
   position: absolute;
@@ -548,11 +535,12 @@ function handleTouchEnd(e) {
   transform: translateX(-50%);
   z-index: 410;
   max-width: 90vw;
-  max-height: calc(70vh - 200px);
+  max-height: calc(50vh - 100px);
   overflow-y: auto;
   padding: 8px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+  pointer-events: none;
 }
 
 .milestones-bar::-webkit-scrollbar {
@@ -580,6 +568,7 @@ function handleTouchEnd(e) {
   max-width: 80vw;
   min-width: 120px;
   text-align: center;
+  pointer-events: auto;
 }
 
 .milestone-title {
