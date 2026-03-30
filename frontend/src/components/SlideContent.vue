@@ -14,10 +14,14 @@
     <!-- 支持的视频格式 -->
     <template v-else-if="photo?.type === 'video' && isSupportedVideo">
       <video
+        ref="videoRef"
         :src="videoUrl"
         class="slide-media"
-        controls
+        autoplay
+        muted
+        loop
         playsinline
+        controls
         @canplay="onLoaded"
         @loadedmetadata="onLoaded"
         @error="onVideoError"
@@ -49,7 +53,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const props = defineProps({
   photo: {
@@ -63,6 +67,24 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['loaded', 'error'])
+
+const videoRef = ref(null)
+
+// 监听当前 slide 变化，控制视频播放
+watch(() => props.isCurrent, (isCurrent) => {
+  if (!videoRef.value) return
+
+  if (isCurrent) {
+    // 切换到当前 slide 时自动播放
+    videoRef.value.play().catch(() => {
+      // 自动播放可能被浏览器阻止，忽略错误
+    })
+  } else {
+    // 离开当前 slide 时暂停并重置
+    videoRef.value.pause()
+    videoRef.value.currentTime = 0
+  }
+})
 
 // 支持的媒体格式
 const SUPPORTED_VIDEO_FORMATS = ['.mp4', '.webm', '.ogg', '.mov', '.livp']
