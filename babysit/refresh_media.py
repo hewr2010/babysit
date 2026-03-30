@@ -38,8 +38,8 @@ from .db import get_standalone_db, update_media_file, delete_media_file
 REFRESH_INTERVAL = 3 * 60  # 3分钟
 
 # 支持的文件扩展名
-SUPPORTED_EXTS = ('.jpg', '.jpeg', '.png', '.mp4', '.mov', '.heic', '.livp')
-VIDEO_EXTS = ('.mp4', '.mov', '.livp')
+SUPPORTED_EXTS = (".jpg", ".jpeg", ".png", ".mp4", ".mov", ".heic", ".livp")
+VIDEO_EXTS = (".mp4", ".mov", ".livp")
 
 
 def get_access_token():
@@ -49,7 +49,8 @@ def get_access_token():
         return None
     with open(token_file) as f:
         import json
-        return json.load(f).get('access_token')
+
+        return json.load(f).get("access_token")
 
 
 def run_bypy(cmd, timeout=60):
@@ -64,28 +65,30 @@ def extract_datetime_from_filename(filename):
     import re
 
     # 2026-03-01 101239.livp -> 2026-03-01, 10:12
-    match = re.match(r'^(\d{4})-(\d{2})-(\d{2}) (\d{2})(\d{2})(\d{2})', filename)
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2}) (\d{2})(\d{2})(\d{2})", filename)
     if match:
         date_str = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
         time_str = f"{match.group(4)}:{match.group(5)}"
         return date_str, time_str
 
     # IMG_20251220_100715.jpg -> 2025-12-20, 10:07
-    match = re.search(r'(IMG|VID)_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})', filename)
+    match = re.search(
+        r"(IMG|VID)_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", filename
+    )
     if match:
         date_str = f"{match.group(2)}-{match.group(3)}-{match.group(4)}"
         time_str = f"{match.group(5)}:{match.group(6)}"
         return date_str, time_str
 
     # video_20260210_105828.mp4 -> 2026-02-10, 10:58
-    match = re.search(r'video_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})', filename)
+    match = re.search(r"video_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})", filename)
     if match:
         date_str = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
         time_str = f"{match.group(4)}:{match.group(5)}"
         return date_str, time_str
 
     # mmexport1764123257729.jpg -> 从时间戳转换
-    match = re.search(r'mmexport(\d{13})', filename)
+    match = re.search(r"mmexport(\d{13})", filename)
     if match:
         timestamp_ms = int(match.group(1))
         dt = datetime.fromtimestamp(timestamp_ms / 1000)
@@ -103,11 +106,11 @@ def extract_exif_datetime(img):
 
         for tag_id, value in exif.items():
             tag_name = TAGS.get(tag_id, tag_id)
-            if tag_name in ('DateTimeOriginal', 'DateTime'):
-                if isinstance(value, str) and len(value) >= 19:
-                    date_part = value[:10].replace(':', '-')
+            if tag_name in ("DateTimeOriginal", "DateTime"):
+                if isinstance(value, str) and len(value) >= 19 and "\x00" not in value:
+                    date_part = value[:10].replace(":", "-")
                     time_part = value[11:16]
-                    if date_part != '0000-00-00' and date_part != '':
+                    if date_part != "0000-00-00" and date_part != "":
                         return date_part, time_part
         return None, None
     except:
@@ -117,12 +120,12 @@ def extract_exif_datetime(img):
 def parse_bypy_list(output):
     """解析 bypy list 输出"""
     files = []
-    for line in output.strip().split('\n'):
+    for line in output.strip().split("\n"):
         line = line.strip()
-        if not line or line.startswith('[') or line.startswith('<E>'):
+        if not line or line.startswith("[") or line.startswith("<E>"):
             continue
-        if line.startswith('F '):
-            parts = line.split(' ')
+        if line.startswith("F "):
+            parts = line.split(" ")
             if len(parts) >= 5:
                 size_idx = -1
                 for i in range(1, len(parts)):
@@ -131,23 +134,27 @@ def parse_bypy_list(output):
                         break
 
                 if size_idx > 1:
-                    filename = ' '.join(parts[1:size_idx])
+                    filename = " ".join(parts[1:size_idx])
                     size = parts[size_idx]
-                    baidu_date_str = parts[size_idx + 1].rstrip(',')
+                    baidu_date_str = parts[size_idx + 1].rstrip(",")
 
-                    date_from_name, time_from_name = extract_datetime_from_filename(filename)
+                    date_from_name, time_from_name = extract_datetime_from_filename(
+                        filename
+                    )
                     date_str = date_from_name if date_from_name else baidu_date_str
 
-                    md5 = parts[-1] if len(parts) > size_idx + 3 else ''
+                    md5 = parts[-1] if len(parts) > size_idx + 3 else ""
 
-                    files.append({
-                        'name': filename,
-                        'size': int(size),
-                        'date': date_str,
-                        'time': time_from_name or '',
-                        'md5': md5,
-                        'baidu_date': baidu_date_str
-                    })
+                    files.append(
+                        {
+                            "name": filename,
+                            "size": int(size),
+                            "date": date_str,
+                            "time": time_from_name or "",
+                            "md5": md5,
+                            "baidu_date": baidu_date_str,
+                        }
+                    )
     return files
 
 
@@ -157,7 +164,7 @@ def get_download_url(filename):
     if not token:
         return None, "未授权"
 
-    path = f'/apps/bypy{BAIDU_REMOTE_PATH}/{filename}'
+    path = f"/apps/bypy{BAIDU_REMOTE_PATH}/{filename}"
 
     try:
         # 方法1: PCS API download 接口
@@ -165,7 +172,7 @@ def get_download_url(filename):
         resp = requests.get(download_url, allow_redirects=False, timeout=10)
 
         if resp.status_code == 302:
-            location = resp.headers.get('Location')
+            location = resp.headers.get("Location")
             if location:
                 return location, None
 
@@ -174,24 +181,24 @@ def get_download_url(filename):
         list_resp = requests.get(file_url, timeout=10)
         list_data = list_resp.json()
 
-        if list_data.get('errno') == 0:
-            file_list = list_data.get('list', [])
+        if list_data.get("errno") == 0:
+            file_list = list_data.get("list", [])
             target_file = None
             for f in file_list:
-                if f.get('server_filename') == filename:
+                if f.get("server_filename") == filename:
                     target_file = f
                     break
 
             if target_file:
-                fs_id = target_file.get('fs_id')
+                fs_id = target_file.get("fs_id")
                 dlink_url = f"https://pan.baidu.com/rest/2.0/xpan/file?method=filemetas&access_token={token}&fsids=[{fs_id}]&dlink=1"
                 dlink_resp = requests.get(dlink_url, timeout=10)
                 dlink_data = dlink_resp.json()
 
-                if dlink_data.get('errno') == 0:
-                    file_info = dlink_data.get('list', [])
-                    if file_info and file_info[0].get('dlink'):
-                        dlink = file_info[0]['dlink']
+                if dlink_data.get("errno") == 0:
+                    file_info = dlink_data.get("list", [])
+                    if file_info and file_info[0].get("dlink"):
+                        dlink = file_info[0]["dlink"]
                         return f"{dlink}&access_token={token}", None
 
         return None, "无法获取下载链接"
@@ -202,11 +209,11 @@ def get_download_url(filename):
 
 def generate_image_thumbnail(img, size):
     """生成图片缩略图"""
-    if img.mode in ('RGBA', 'P'):
-        img = img.convert('RGB')
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
     img.thumbnail(size, Image.Resampling.LANCZOS)
     output = io.BytesIO()
-    img.save(output, format='JPEG', quality=85)
+    img.save(output, format="JPEG", quality=85)
     output.seek(0)
     return output
 
@@ -217,12 +224,12 @@ def generate_video_thumbnail(video_data, filename, size):
     temp_dir.mkdir(exist_ok=True)
 
     # 处理 .livp 文件
-    if filename.lower().endswith('.livp'):
+    if filename.lower().endswith(".livp"):
         try:
-            with zipfile.ZipFile(io.BytesIO(video_data), 'r') as z:
+            with zipfile.ZipFile(io.BytesIO(video_data), "r") as z:
                 mov_name = None
                 for name in z.namelist():
-                    if name.lower().endswith('.mov'):
+                    if name.lower().endswith(".mov"):
                         mov_name = name
                         break
 
@@ -230,22 +237,31 @@ def generate_video_thumbnail(video_data, filename, size):
                     return None
 
                 video_path = temp_dir / f"{filename}.mov"
-                with open(video_path, 'wb') as f:
+                with open(video_path, "wb") as f:
                     f.write(z.read(mov_name))
         except zipfile.BadZipFile:
             return None
     else:
         video_path = temp_dir / filename
-        with open(video_path, 'wb') as f:
+        with open(video_path, "wb") as f:
             f.write(video_data)
 
     # 使用 ffmpeg 提取第一帧
     temp_frame = temp_dir / f"{filename}_frame.jpg"
     try:
         result = subprocess.run(
-            ['ffmpeg', '-i', str(video_path), '-vframes', '1', '-q:v', '2', str(temp_frame)],
+            [
+                "ffmpeg",
+                "-i",
+                str(video_path),
+                "-vframes",
+                "1",
+                "-q:v",
+                "2",
+                str(temp_frame),
+            ],
             capture_output=True,
-            timeout=30
+            timeout=30,
         )
 
         video_path.unlink(missing_ok=True)
@@ -267,10 +283,10 @@ def generate_video_thumbnail(video_data, filename, size):
 def extract_livp_video(video_data, filename):
     """从 .livp 文件中提取视频"""
     try:
-        with zipfile.ZipFile(io.BytesIO(video_data), 'r') as z:
+        with zipfile.ZipFile(io.BytesIO(video_data), "r") as z:
             mov_name = None
             for name in z.namelist():
-                if name.lower().endswith('.mov'):
+                if name.lower().endswith(".mov"):
                     mov_name = name
                     break
 
@@ -288,7 +304,7 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
     处理单个媒体文件
     返回 (success, updated_info) 元组
     """
-    filename = file_info['name']
+    filename = file_info["name"]
     ext = os.path.splitext(filename)[1].lower()
     is_video = ext in VIDEO_EXTS
 
@@ -317,13 +333,13 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
             img = Image.open(io.BytesIO(file_data))
             # 提取 EXIF 时间
             exif_date, exif_time = extract_exif_datetime(img)
-            if exif_date and exif_date != '0000-00-00':
-                file_info['date'] = exif_date
-                file_info['time'] = exif_time or file_info.get('time', '')
+            if exif_date and exif_date != "0000-00-00":
+                file_info["date"] = exif_date
+                file_info["time"] = exif_time or file_info.get("time", "")
             thumb_data = generate_image_thumbnail(img, (200, 200))
 
         if thumb_data:
-            with open(thumb_path, 'wb') as f:
+            with open(thumb_path, "wb") as f:
                 f.write(thumb_data.getvalue())
             print(f"    ✓ 缩略图已生成")
         else:
@@ -339,7 +355,7 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
             preview_data = generate_image_thumbnail(img, (800, 800))
 
         if preview_data:
-            with open(preview_path, 'wb') as f:
+            with open(preview_path, "wb") as f:
                 f.write(preview_data.getvalue())
             print(f"    ✓ 预览图已生成")
         else:
@@ -347,25 +363,25 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
             return False, file_info
 
         # 处理视频文件：.livp 提取视频，.mov/.mp4 直接保存
-        if ext == '.livp':
+        if ext == ".livp":
             video_data = extract_livp_video(file_data, filename)
             if video_data:
                 video_path = videos_dir / f"{quote(filename, safe='')}.mov"
-                with open(video_path, 'wb') as f:
+                with open(video_path, "wb") as f:
                     f.write(video_data)
                 print(f"    ✓ 视频已提取")
             else:
                 print(f"    ❌ 视频提取失败")
                 return False, file_info
-        elif ext in ('.mov', '.mp4'):
+        elif ext in (".mov", ".mp4"):
             # 直接下载视频文件到本地（避免浏览器 CORS 问题）
             video_path = videos_dir / f"{quote(filename, safe='')}"
-            with open(video_path, 'wb') as f:
+            with open(video_path, "wb") as f:
                 f.write(file_data)
             print(f"    ✓ 视频已缓存")
 
-        file_info['processed'] = True
-        file_info['processed_at'] = datetime.now().isoformat()
+        file_info["processed"] = True
+        file_info["processed_at"] = datetime.now().isoformat()
         print(f"    ✓ 处理完成")
         return True, file_info
 
@@ -376,9 +392,9 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
 
 def refresh_media():
     """执行一次媒体刷新操作"""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"🔄 开始媒体刷新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # 创建必要的目录
     thumbs_dir = CACHE_DIR / "thumbs"
@@ -401,11 +417,12 @@ def refresh_media():
     # 过滤支持的文件类型
     media_files = []
     for f in baidu_files:
-        ext = os.path.splitext(f['name'])[1].lower()
+        ext = os.path.splitext(f["name"])[1].lower()
         if ext in SUPPORTED_EXTS:
-            f['type'] = 'video' if ext in VIDEO_EXTS else 'photo'
-            f['processed'] = False
+            f["type"] = "video" if ext in VIDEO_EXTS else "photo"
+            f["processed"] = False
             media_files.append(f)
+    media_files.sort(key=lambda x: x["name"], reverse=True)
 
     print(f"📊 找到 {len(media_files)} 个多媒体文件")
 
@@ -420,19 +437,18 @@ def refresh_media():
         current_names = set()
 
         for file_info in media_files:
-            filename = file_info['name']
+            filename = file_info["name"]
             ext = os.path.splitext(filename)[1].lower()
-            md5 = file_info.get('md5', '')
+            md5 = file_info.get("md5", "")
             current_names.add(filename)
 
             # 检查数据库中是否已存在且未改变
             cursor = db.execute(
-                "SELECT md5, processed FROM media_files WHERE filename = ?",
-                (filename,)
+                "SELECT md5, processed FROM media_files WHERE filename = ?", (filename,)
             )
             existing = cursor.fetchone()
 
-            if existing and existing['md5'] == md5 and existing['processed']:
+            if existing and existing["md5"] == md5 and existing["processed"]:
                 # 文件未改变且已处理，检查缓存文件是否完整
                 need_reprocess = False
 
@@ -450,12 +466,12 @@ def refresh_media():
 
                 # 检查视频缓存（视频文件需要检查视频缓存）
                 if not need_reprocess:
-                    if filename.lower().endswith('.livp'):
+                    if filename.lower().endswith(".livp"):
                         video_path = videos_dir / f"{quote(filename, safe='')}.mov"
                         if not video_path.exists():
                             print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
                             need_reprocess = True
-                    elif ext in ('.mov', '.mp4'):
+                    elif ext in (".mov", ".mp4"):
                         video_path = videos_dir / f"{quote(filename, safe='')}"
                         if not video_path.exists():
                             print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
@@ -484,7 +500,7 @@ def refresh_media():
 
         # 清理不存在的文件记录
         cursor = db.execute("SELECT filename FROM media_files")
-        db_names = {row['filename'] for row in cursor.fetchall()}
+        db_names = {row["filename"] for row in cursor.fetchall()}
         removed = db_names - current_names
 
         for name in removed:
@@ -495,31 +511,29 @@ def refresh_media():
             print(f"\n🗑️  清理了 {len(removed)} 个不存在的文件记录")
 
         # 统计
-        cursor = db.execute(
-            "SELECT COUNT(*) FROM media_files WHERE processed = 1"
-        )
+        cursor = db.execute("SELECT COUNT(*) FROM media_files WHERE processed = 1")
         total_available = cursor.fetchone()[0]
 
     finally:
         db.close()
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"✅ 刷新完成")
     print(f"   新增: {new_count}")
     print(f"   更新: {updated_count}")
     print(f"   失败: {failed_count}")
     print(f"   总计可用: {total_available}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
 
 def main():
     """主循环"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("🚀 媒体刷新服务启动")
     print(f"⏱️  刷新间隔: {REFRESH_INTERVAL // 60} 分钟")
     print(f"🗄️  数据库: {DATA_DIR / 'babysit.db'}")
     print(f"☁️  网盘路径: {BAIDU_REMOTE_PATH}")
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
     # 立即执行一次
     try:
@@ -527,6 +541,7 @@ def main():
     except Exception as e:
         print(f"❌ 首次刷新失败: {e}")
         import traceback
+
         traceback.print_exc()
 
     # 定时循环
@@ -539,6 +554,7 @@ def main():
         except Exception as e:
             print(f"❌ 刷新失败: {e}")
             import traceback
+
             traceback.print_exc()
             print("   将在下次循环重试...")
 
