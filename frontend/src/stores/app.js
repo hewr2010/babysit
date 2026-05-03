@@ -24,23 +24,25 @@ export const useAppStore = defineStore('app', () => {
     return Math.max(0, months)
   })
 
-  // 宝宝年龄显示（不足一月显示日龄）
+  // 宝宝年龄显示（精确到几个月几天）
   const babyAgeDisplay = computed(() => {
     if (!baby.value?.birthday) return null
     const birth = dayjs(baby.value.birthday)
     const now = dayjs()
-    const totalDays = now.diff(birth, 'day')
 
-    // 如果不足30天，显示日龄
-    if (totalDays < 30) {
-      return `${totalDays}天`
-    }
-
-    // 否则显示月龄
     let months = now.diff(birth, 'month')
-    if (now.date() < birth.date()) months--
+    if (birth.add(months, 'month').isAfter(now)) {
+      months--
+    }
     months = Math.max(0, months)
-    return `${months}个月`
+
+    const monthDate = birth.add(months, 'month')
+    const days = now.diff(monthDate, 'day')
+
+    if (months === 0) {
+      return `${days}天`
+    }
+    return `${months}个月${days}天`
   })
 
   const monthDisplay = computed(() => {
