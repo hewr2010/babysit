@@ -14,6 +14,7 @@
 
 import io
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -207,6 +208,25 @@ def get_download_url(filename):
         return None, str(e)
 
 
+def _download_to_file(url, dest_path, timeout=120):
+    """流式下载文件到本地，避免把整个文件载入内存"""
+    try:
+        with requests.get(url, stream=True, timeout=timeout) as resp:
+            resp.raise_for_status()
+            with open(dest_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        f.write(chunk)
+        return True, None
+    except Exception as e:
+        print(f"    ❌ 下载失败: {e}")
+        try:
+            Path(dest_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False, str(e)
+
+
 def generate_image_thumbnail(img, size):
     """生成图片缩略图"""
     if img.mode in ("RGBA", "P"):
@@ -218,36 +238,15 @@ def generate_image_thumbnail(img, size):
     return output
 
 
-def generate_video_thumbnail(video_data, filename, size):
-    """生成视频缩略图（提取第一帧）"""
+def generate_video_thumbnail(video_path, size):
+    """从本地视频文件提取第一帧并生成缩略图"""
+    if not video_path.exists():
+        return None
+
     temp_dir = CACHE_DIR / "temp_video"
     temp_dir.mkdir(exist_ok=True)
+    temp_frame = temp_dir / f"{video_path.name}_frame.jpg"
 
-    # 处理 .livp 文件
-    if filename.lower().endswith(".livp"):
-        try:
-            with zipfile.ZipFile(io.BytesIO(video_data), "r") as z:
-                mov_name = None
-                for name in z.namelist():
-                    if name.lower().endswith(".mov"):
-                        mov_name = name
-                        break
-
-                if not mov_name:
-                    return None
-
-                video_path = temp_dir / f"{filename}.mov"
-                with open(video_path, "wb") as f:
-                    f.write(z.read(mov_name))
-        except zipfile.BadZipFile:
-            return None
-    else:
-        video_path = temp_dir / filename
-        with open(video_path, "wb") as f:
-            f.write(video_data)
-
-    # 使用 ffmpeg 提取第一帧
-    temp_frame = temp_dir / f"{filename}_frame.jpg"
     try:
         result = subprocess.run(
             [
@@ -264,18 +263,16 @@ def generate_video_thumbnail(video_data, filename, size):
             timeout=30,
         )
 
-        video_path.unlink(missing_ok=True)
-
         if result.returncode != 0 or not temp_frame.exists():
             return None
 
-        img = Image.open(temp_frame)
-        temp_frame.unlink(missing_ok=True)
+        with Image.open(temp_frame) as img:
+            out = generate_image_thumbnail(img, size)
 
-        return generate_image_thumbnail(img, size)
+        temp_frame.unlink(missing_ok=True)
+        return out
     except Exception as e:
         print(f"Error generating video thumbnail: {e}")
-        video_path.unlink(missing_ok=True)
         temp_frame.unlink(missing_ok=True)
         return None
 
@@ -301,7 +298,7 @@ def extract_livp_video(video_data, filename):
 
 def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
     """
-    处理单个媒体文件
+    处理单个媒体文件（视频流式下载到磁盘，避免整文件进内存）
     返回 (success, updated_info) 元组
     """
     filename = file_info["name"]
@@ -316,27 +313,57 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
         print(f"    ❌ 无法获取下载链接: {error}")
         return False, file_info
 
+    temp_dir = CACHE_DIR / "temp_video"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = quote(filename, safe="")
+    temp_original = temp_dir / f"dl_{safe_name}"
+    temp_video = None
+
     try:
-        # 下载文件
-        resp = requests.get(url, timeout=120)
-        if resp.status_code != 200:
-            print(f"    ❌ 下载失败: HTTP {resp.status_code}")
+        # 流式下载原始文件（视频不会进入内存）
+        ok, err = _download_to_file(url, temp_original)
+        if not ok:
             return False, file_info
 
-        file_data = resp.content
+        # 对 livp 先一次性解压出 mov；普通视频直接用下载好的临时文件
+        if ext == ".livp":
+            temp_video = temp_dir / f"{safe_name}.mov"
+            try:
+                with zipfile.ZipFile(temp_original, "r") as z:
+                    mov_name = None
+                    for name in z.namelist():
+                        if name.lower().endswith(".mov"):
+                            mov_name = name
+                            break
+
+                    if not mov_name:
+                        print(f"    ❌ livp 中未找到 mov")
+                        return False, file_info
+
+                    with open(temp_video, "wb") as out_f:
+                        with z.open(mov_name) as src:
+                            while True:
+                                chunk = src.read(65536)
+                                if not chunk:
+                                    break
+                                out_f.write(chunk)
+            except zipfile.BadZipFile:
+                print(f"    ❌ livp 文件损坏")
+                return False, file_info
+        elif is_video:
+            temp_video = temp_original
 
         # 生成缩略图 (200x200)
-        thumb_path = thumbs_dir / f"{quote(filename, safe='')}_200x200.jpg"
+        thumb_path = thumbs_dir / f"{safe_name}_200x200.jpg"
         if is_video:
-            thumb_data = generate_video_thumbnail(file_data, filename, (200, 200))
+            thumb_data = generate_video_thumbnail(temp_video, (200, 200))
         else:
-            img = Image.open(io.BytesIO(file_data))
-            # 提取 EXIF 时间
-            exif_date, exif_time = extract_exif_datetime(img)
-            if exif_date and exif_date != "0000-00-00":
-                file_info["date"] = exif_date
-                file_info["time"] = exif_time or file_info.get("time", "")
-            thumb_data = generate_image_thumbnail(img, (200, 200))
+            with Image.open(temp_original) as img:
+                exif_date, exif_time = extract_exif_datetime(img)
+                if exif_date and exif_date != "0000-00-00":
+                    file_info["date"] = exif_date
+                    file_info["time"] = exif_time or file_info.get("time", "")
+                thumb_data = generate_image_thumbnail(img, (200, 200))
 
         if thumb_data:
             with open(thumb_path, "wb") as f:
@@ -347,12 +374,12 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
             return False, file_info
 
         # 生成预览图 (800x800)
-        preview_path = previews_dir / f"{quote(filename, safe='')}_800x800.jpg"
+        preview_path = previews_dir / f"{safe_name}_800x800.jpg"
         if is_video:
-            preview_data = generate_video_thumbnail(file_data, filename, (800, 800))
+            preview_data = generate_video_thumbnail(temp_video, (800, 800))
         else:
-            img = Image.open(io.BytesIO(file_data))
-            preview_data = generate_image_thumbnail(img, (800, 800))
+            with Image.open(temp_original) as img:
+                preview_data = generate_image_thumbnail(img, (800, 800))
 
         if preview_data:
             with open(preview_path, "wb") as f:
@@ -362,22 +389,14 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
             print(f"    ❌ 预览图生成失败")
             return False, file_info
 
-        # 处理视频文件：.livp 提取视频，.mov/.mp4 直接保存
+        # 缓存视频文件到本地（供前端播放，避免 CORS）
         if ext == ".livp":
-            video_data = extract_livp_video(file_data, filename)
-            if video_data:
-                video_path = videos_dir / f"{quote(filename, safe='')}.mov"
-                with open(video_path, "wb") as f:
-                    f.write(video_data)
-                print(f"    ✓ 视频已提取")
-            else:
-                print(f"    ❌ 视频提取失败")
-                return False, file_info
+            video_cache_path = videos_dir / f"{safe_name}.mov"
+            shutil.move(str(temp_video), str(video_cache_path))
+            print(f"    ✓ 视频已提取")
         elif ext in (".mov", ".mp4"):
-            # 直接下载视频文件到本地（避免浏览器 CORS 问题）
-            video_path = videos_dir / f"{quote(filename, safe='')}"
-            with open(video_path, "wb") as f:
-                f.write(file_data)
+            video_cache_path = videos_dir / f"{safe_name}"
+            shutil.move(str(temp_original), str(video_cache_path))
             print(f"    ✓ 视频已缓存")
 
         file_info["processed"] = True
@@ -388,6 +407,14 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
     except Exception as e:
         print(f"    ❌ 处理异常: {e}")
         return False, file_info
+
+    finally:
+        for p in (temp_original, temp_video):
+            if p:
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
 
 def refresh_media():

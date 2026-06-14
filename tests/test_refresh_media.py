@@ -239,3 +239,61 @@ def test_delete_media_file(test_db):
 
     assert row is None
     db.close()
+
+
+def test_process_video_uses_streaming(tmp_path, monkeypatch):
+    """验证大视频在 refresh_media 中通过流式下载落盘，而不是全部读进内存"""
+    import shutil
+    import subprocess
+    from urllib.parse import quote
+
+    import babysit.refresh_media as rm
+
+    fake_video = tmp_path / "fake.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-f", "lavfi",
+            "-i", "testsrc=duration=1:size=320x240:rate=1",
+            "-pix_fmt", "yuv420p",
+            "-y",
+            str(fake_video),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    monkeypatch.setattr(rm, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(rm, "get_download_url", lambda fn: ("http://dummy", None))
+
+    def fake_download(url, dest_path, timeout=120):
+        shutil.copy(str(fake_video), str(dest_path))
+        return True, None
+
+    monkeypatch.setattr(rm, "_download_to_file", fake_download)
+
+    thumbs = tmp_path / "thumbs"
+    previews = tmp_path / "previews"
+    videos = tmp_path / "videos"
+    for d in (thumbs, previews, videos):
+        d.mkdir(parents=True, exist_ok=True)
+
+    filename = "VID_20260610_140921.mp4"
+    safe = quote(filename, safe="")
+    info = {
+        "name": filename,
+        "type": "video",
+        "size": fake_video.stat().st_size,
+        "date": "2026-06-10",
+        "time": "14:09",
+        "baidu_date": "2026-06-10",
+        "processed": False,
+    }
+
+    success, updated = rm.process_media_file(info, thumbs, previews, videos)
+
+    assert success is True
+    assert updated["processed"] is True
+    assert (thumbs / f"{safe}_200x200.jpg").exists()
+    assert (previews / f"{safe}_800x800.jpg").exists()
+    assert (videos / safe).exists()
