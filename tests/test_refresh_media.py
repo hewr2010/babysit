@@ -297,3 +297,69 @@ def test_process_video_uses_streaming(tmp_path, monkeypatch):
     assert (thumbs / f"{safe}_200x200.jpg").exists()
     assert (previews / f"{safe}_800x800.jpg").exists()
     assert (videos / safe).exists()
+
+
+def test_repair_media_database_resets_partial_records(test_db, tmp_path, monkeypatch):
+    """repair_media_database 应把缓存不完整的 processed 记录重置为 0 并清理残片"""
+    import shutil
+    import subprocess
+    from urllib.parse import quote
+
+    import babysit.db as db_module
+    import babysit.refresh_media as rm
+
+    fake_video = tmp_path / "fake.mp4"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-f", "lavfi",
+            "-i", "testsrc=duration=1:size=320x240:rate=1",
+            "-pix_fmt", "yuv420p",
+            "-y",
+            str(fake_video),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(rm, "CACHE_DIR", cache_root)
+    monkeypatch.setattr(db_module, "DB_PATH", test_db)
+
+    thumbs = cache_root / "thumbs"
+    previews = cache_root / "previews"
+    videos = cache_root / "videos"
+    for d in (thumbs, previews, videos):
+        d.mkdir(parents=True, exist_ok=True)
+
+    filename = "VID_20260610_140921.mp4"
+    safe = quote(filename, safe="")
+
+    # 模拟磁盘满导致的半成功：缩略图生成成功，但视频缓存缺失
+    shutil.copy(str(fake_video), str(videos / safe))
+    # 故意不创建预览图，让数据库看起来是 processed=1
+    thumb = thumbs / f"{safe}_200x200.jpg"
+    thumb.write_bytes(b"")
+
+    db = sqlite3.connect(test_db)
+    db.execute(
+        "INSERT INTO media_files (filename, file_type, file_size, md5, date, time, "
+        "baidu_date, processed, processed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (filename, "video", 12345, "md5", "2026-06-10", "14:09", "2026-06-10", 1, "2026-06-10T00:00:00"),
+    )
+    db.commit()
+    db.close()
+
+    rm.repair_media_database()
+
+    db = sqlite3.connect(test_db)
+    cursor = db.execute("SELECT processed FROM media_files WHERE filename = ?", (filename,))
+    row = cursor.fetchone()
+    db.close()
+
+    assert row is not None
+    assert row[0] == 0
+    # 缩略图残片应被清理
+    assert not thumb.exists()
+    # 视频缓存完整，应保留
+    assert (videos / safe).exists()

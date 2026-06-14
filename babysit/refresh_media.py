@@ -12,6 +12,7 @@
     - 使用 WAL 模式处理并发访问，避免 race condition
 """
 
+import argparse
 import io
 import os
 import shutil
@@ -553,6 +554,111 @@ def refresh_media():
     print(f"{'=' * 60}\n")
 
 
+def repair_media_database():
+    """修复数据库与本地缓存之间的不一致（磁盘满等导致的半成品）"""
+    print("\n" + "=" * 60)
+    print("🔧 开始修复数据库与缓存一致性")
+    print("=" * 60)
+
+    db = get_standalone_db()
+    try:
+        thumbs_dir = CACHE_DIR / "thumbs"
+        previews_dir = CACHE_DIR / "previews"
+        videos_dir = CACHE_DIR / "videos"
+        for d in (thumbs_dir, previews_dir, videos_dir):
+            d.mkdir(exist_ok=True)
+
+        cursor = db.execute(
+            "SELECT filename, file_type, processed "
+            "FROM media_files ORDER BY date DESC, time DESC"
+        )
+        rows = cursor.fetchall()
+
+        reset_count = 0
+        set_processed_count = 0
+        cleaned_bytes = 0
+
+        for row in rows:
+            filename = row["filename"]
+            ext = os.path.splitext(filename)[1].lower()
+            safe_name = quote(filename, safe="")
+            is_video = ext in VIDEO_EXTS
+
+            thumb_path = thumbs_dir / f"{safe_name}_200x200.jpg"
+            preview_path = previews_dir / f"{safe_name}_800x800.jpg"
+
+            required = [thumb_path, preview_path]
+            if is_video:
+                if ext == ".livp":
+                    video_path = videos_dir / f"{safe_name}.mov"
+                elif ext in (".mov", ".mp4"):
+                    video_path = videos_dir / f"{safe_name}"
+                else:
+                    video_path = None
+                if video_path:
+                    required.append(video_path)
+
+            missing_or_empty = []
+            for p in required:
+                if not p.exists() or p.stat().st_size == 0:
+                    missing_or_empty.append(p.name)
+
+            if missing_or_empty:
+                if row["processed"]:
+                    db.execute(
+                        "UPDATE media_files SET processed = 0, processed_at = NULL, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE filename = ?",
+                        (filename,),
+                    )
+                    reset_count += 1
+                    print(
+                        f"  已重置为未处理: {filename} "
+                        f"(缺失: {', '.join(missing_or_empty)})"
+                    )
+                    # 清理已存在的半成品/空文件，保留完整的缓存
+                    for p in required:
+                        if p.exists() and (
+                            p.name in missing_or_empty or p.stat().st_size == 0
+                        ):
+                            try:
+                                cleaned_bytes += p.stat().st_size
+                                p.unlink()
+                            except OSError:
+                                pass
+            else:
+                if not row["processed"]:
+                    db.execute(
+                        "UPDATE media_files SET processed = 1, "
+                        "processed_at = CURRENT_TIMESTAMP, "
+                        "updated_at = CURRENT_TIMESTAMP WHERE filename = ?",
+                        (filename,),
+                    )
+                    set_processed_count += 1
+                    print(f"  补标记为已处理: {filename}")
+
+        db.commit()
+
+        # 清理 temp_video 中的残留临时文件
+        temp_dir = CACHE_DIR / "temp_video"
+        if temp_dir.exists():
+            for p in temp_dir.iterdir():
+                try:
+                    cleaned_bytes += p.stat().st_size
+                    p.unlink()
+                except OSError:
+                    pass
+
+        print("=" * 60)
+        print(
+            f"✅ 修复完成: 重置 {reset_count} 条, "
+            f"补标记 {set_processed_count} 条, "
+            f"清理 {cleaned_bytes / 1024 / 1024:.2f} MB"
+        )
+        print("=" * 60 + "\n")
+    finally:
+        db.close()
+
+
 def main():
     """主循环"""
     print("\n" + "=" * 60)
@@ -587,6 +693,19 @@ def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="后台媒体刷新服务")
+    parser.add_argument(
+        "--repair", action="store_true", help="修复数据库与缓存的不一致后退出"
+    )
+    args = parser.parse_args()
+
+    if args.repair:
+        try:
+            repair_media_database()
+        except KeyboardInterrupt:
+            print("\n\n👋 已中断")
+        sys.exit(0)
+
     try:
         main()
     except KeyboardInterrupt:
