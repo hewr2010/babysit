@@ -1,5 +1,8 @@
 <template>
   <view class="home">
+    <view v-if="initError" class="error-banner">
+      <text class="error-text">{{ initError }}</text>
+    </view>
     <scroll-view
       scroll-y
       class="main-scroll"
@@ -40,6 +43,7 @@ const scrollIntoView = ref('')
 const babyModalVisible = ref(false)
 const growthModalVisible = ref(false)
 const growthType = ref('height')
+const initError = ref('')
 
 onMounted(async () => {
   console.log('[index] onMounted')
@@ -47,8 +51,16 @@ onMounted(async () => {
     await store.init()
     console.log('[index] init done')
   } catch (e) {
+    const detail = e && (e.errMsg || e.message || JSON.stringify(e))
+    const text = `数据加载失败\n${detail}`
+    initError.value = text
     console.error('init failed:', e)
-    uni.showToast({ title: '数据加载失败，请检查网络', icon: 'none', duration: 3000 })
+    uni.showModal({
+      title: '加载失败',
+      content: text,
+      showCancel: false,
+      confirmText: '知道了'
+    })
   }
 })
 
@@ -86,6 +98,20 @@ function openPhotoViewer(index) {
 .home {
   min-height: 100vh;
   background: #faf5f7;
+}
+
+.error-banner {
+  background: #fee2e2;
+  padding: 24rpx 32rpx;
+  border-bottom: 2rpx solid #fecaca;
+}
+
+.error-text {
+  color: #991b1b;
+  font-size: 24rpx;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .main-scroll {
