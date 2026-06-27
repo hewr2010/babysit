@@ -198,9 +198,10 @@ frontend-mp/src/
 
 ### 微信小程序
 1. 开发：`frontend-mp/src/**/*.vue` 或 `*.ts`
-2. 构建：`cd frontend-mp && npm run build:mp-weixin`
-3. 产物在 `frontend-mp/dist/build/mp-weixin/`
-4. 自动化验证：`node frontend-mp/scripts/screenshot.js`
+2. 配置 AppID：编辑 `frontend-mp/src/manifest.json`，把 `appid` 和 `mp-weixin.appid` 填成你自己的微信小程序 AppID（仓库里留空，不提交真实 ID）
+3. 构建：`cd frontend-mp && npm run build:mp-weixin`
+4. 产物在 `frontend-mp/dist/build/mp-weixin/`
+5. 自动化验证：`node frontend-mp/scripts/screenshot.js`
 
 ## 小程序验证指南
 
@@ -232,3 +233,17 @@ node scripts/screenshot.js
 - **WXSS 限制**：不支持 `*` 通配符选择器，不支持 `calc()` 里混用 `rpx` 与 `px`（建议用 JS 动态计算 px 值）。
 - **storage 清理**：自动化测试里要用 `wx.clearStorageSync()` 而不是 `uni.clearStorageSync()` 才能清干净。
 - **事件未绑定**：按钮点了没反应，先检查父组件是否真的监听了对应事件。
+
+## 小程序部署流程
+
+1. 注册 [微信公众平台](https://mp.weixin.qq.com) 小程序账号，拿到 AppID
+2. 把 `frontend-mp/src/manifest.json` 里的 `appid` 和 `mp-weixin.appid` 填成你的 AppID
+3. 微信公众平台「开发管理 → 开发设置」配置合法域名：
+   - `request合法域名`：`https://qqing.top`
+   - `downloadFile合法域名`：`https://qqing.top`
+4. 构建：`cd frontend-mp && npm run build:mp-weixin`
+5. 微信开发者工具导入 `frontend-mp/dist/build/mp-weixin`
+6. 开发者工具点击「上传」，填写版本号和备注
+7. 微信公众平台「版本管理」里设为「体验版」扫码真机测试，或提交审核后发布
+
+**注意**：代码里不要提交真实的 AppID、密钥、token 等敏感信息。`manifest.json` 里的 AppID 在本地开发/上传前再填。
