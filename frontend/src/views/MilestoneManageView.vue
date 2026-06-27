@@ -146,8 +146,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import dayjs from 'dayjs'
-
-const API_BASE = '/api'
+import { API_BASE } from '../shared/api'
+import { request } from '../shared/request'
 
 const loading = ref(false)
 const photos = ref([])
@@ -174,10 +174,7 @@ onMounted(() => {
 async function initAvailableMonths() {
   try {
     // 获取所有已处理的媒体文件
-    const res = await fetch(`${API_BASE}/album`)
-    if (!res.ok) return
-
-    const allPhotos = await res.json()
+    const allPhotos = await request(`${API_BASE}/album`)
 
     // 提取所有有照片的月份
     const monthsSet = new Set()
@@ -232,22 +229,19 @@ function updateMonthCounts() {
 
 async function fetchAllMilestones() {
   try {
-    const res = await fetch(`${API_BASE}/milestones`)
-    if (res.ok) {
-      allMilestones.value = await res.json()
+    allMilestones.value = await request(`${API_BASE}/milestones`)
 
-      // 按照片分组
-      const grouped = {}
-      allMilestones.value.forEach(ms => {
-        if (!grouped[ms.media_filename]) {
-          grouped[ms.media_filename] = []
-        }
-        grouped[ms.media_filename].push(ms)
-      })
-      milestonesByPhoto.value = grouped
+    // 按照片分组
+    const grouped = {}
+    allMilestones.value.forEach(ms => {
+      if (!grouped[ms.media_filename]) {
+        grouped[ms.media_filename] = []
+      }
+      grouped[ms.media_filename].push(ms)
+    })
+    milestonesByPhoto.value = grouped
 
-      updateMonthCounts()
-    }
+    updateMonthCounts()
   } catch (e) {
     console.error('Failed to fetch milestones:', e)
   }
@@ -264,20 +258,17 @@ function selectMonth(monthKey) {
 async function loadMonthPhotos(year, month) {
   loading.value = true
   try {
-    const res = await fetch(`${API_BASE}/album/${year}/${month}`)
-    if (res.ok) {
-      const dateGroups = await res.json()
+    const dateGroups = await request(`${API_BASE}/album/${year}/${month}`)
 
-      // 按日期排序，展开为数组
-      const sortedDates = Object.keys(dateGroups).sort().reverse()
-      let allPhotos = []
-      for (const date of sortedDates) {
-        const files = dateGroups[date]
-        files.sort((a, b) => (b.time || '').localeCompare(a.time || ''))
-        allPhotos = allPhotos.concat(files)
-      }
-      photos.value = allPhotos
+    // 按日期排序，展开为数组
+    const sortedDates = Object.keys(dateGroups).sort().reverse()
+    let allPhotos = []
+    for (const date of sortedDates) {
+      const files = dateGroups[date]
+      files.sort((a, b) => (b.time || '').localeCompare(a.time || ''))
+      allPhotos = allPhotos.concat(files)
     }
+    photos.value = allPhotos
   } catch (e) {
     console.error('Failed to load photos:', e)
   } finally {
@@ -294,10 +285,7 @@ async function openEditor(photo) {
 
   // 加载已有关联时刻
   try {
-    const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(photo.name)}`)
-    if (res.ok) {
-      editorMilestones.value = await res.json()
-    }
+    editorMilestones.value = await request(`${API_BASE}/milestones/${encodeURIComponent(photo.name)}`)
   } catch (e) {
     console.error('Failed to load photo milestones:', e)
   }
@@ -314,30 +302,24 @@ async function addMilestone() {
 
   adding.value = true
   try {
-    const res = await fetch(`${API_BASE}/milestones`, {
+    await request(`${API_BASE}/milestones`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      data: {
         media_filename: editorPhoto.value.name,
         title: newTitle.value.trim(),
         description: newDescription.value.trim() || null
-      })
+      }
     })
 
-    if (res.ok) {
-      newTitle.value = ''
-      newDescription.value = ''
-      // 刷新列表
-      await openEditor(editorPhoto.value)
-      // 刷新全局数据
-      await fetchAllMilestones()
-    } else {
-      const err = await res.json()
-      alert(err.error || '添加失败')
-    }
+    newTitle.value = ''
+    newDescription.value = ''
+    // 刷新列表
+    await openEditor(editorPhoto.value)
+    // 刷新全局数据
+    await fetchAllMilestones()
   } catch (e) {
     console.error('Failed to add milestone:', e)
-    alert('添加失败')
+    alert(e.message || '添加失败')
   } finally {
     adding.value = false
   }
@@ -346,17 +328,12 @@ async function addMilestone() {
 async function deleteMilestone(id) {
   deleting.value = id
   try {
-    const res = await fetch(`${API_BASE}/milestones/${id}`, {
-      method: 'DELETE'
-    })
-
-    if (res.ok) {
-      await openEditor(editorPhoto.value)
-      await fetchAllMilestones()
-    }
+    await request(`${API_BASE}/milestones/${id}`, { method: 'DELETE' })
+    await openEditor(editorPhoto.value)
+    await fetchAllMilestones()
   } catch (e) {
     console.error('Failed to delete milestone:', e)
-    alert('删除失败')
+    alert(e.message || '删除失败')
   } finally {
     deleting.value = null
   }

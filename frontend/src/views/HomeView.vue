@@ -27,6 +27,7 @@ import { onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
+import { router as platformRouter } from '../shared/router'
 import Header from '../components/Header.vue'
 import GrowthSection from '../components/GrowthSection.vue'
 import PhotoSection from '../components/PhotoSection.vue'
@@ -77,7 +78,7 @@ onMounted(async () => {
   // 如果 URL 中有 photo 参数，优先处理
   if (route.query.photo) {
     // 从 URL 加载年月并加载数据（不更新 URL）
-    const path = window.location.pathname
+    const path = platformRouter.getPath()
     const match = path.match(/\/(\d{4})\/(\d{1,2})/)
     if (match) {
       store.setMonth(parseInt(match[1]), parseInt(match[2]), false)

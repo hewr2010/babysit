@@ -169,6 +169,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function init() {
+    console.log('[store] init start')
     loadFromURL()  // 先加载URL参数
     await fetchBaby()
     await Promise.all([
@@ -177,6 +178,7 @@ export const useAppStore = defineStore('app', () => {
       fetchMilestones()
     ])
     updateURL()  // 更新URL保证一致
+    console.log('[store] init done')
   }
 
   const latestGrowthRecord = computed(() => {

@@ -1,45 +1,43 @@
 <template>
-  <div v-if="isAuthenticated" class="auth-container">
-    <slot />
-  </div>
-  <div v-else class="auth-wall">
-    <div class="auth-box">
-      <div class="auth-icon">👶</div>
-      <h2 class="auth-title">宝宝成长日志</h2>
-      <p class="auth-desc">请输入宝宝的真名以继续访问</p>
-      <div class="auth-input-wrapper">
+  <view class="auth-wall">
+    <view class="auth-box">
+      <view class="auth-icon">👶</view>
+      <text class="auth-title">宝宝成长日志</text>
+      <text class="auth-desc">请输入宝宝的真名以继续访问</text>
+      <view class="auth-input-wrapper">
         <input
           v-model="inputName"
           type="text"
           placeholder="宝宝真名"
           class="auth-input"
-          @keyup.enter="verify"
+          confirm-type="done"
+          @confirm="verify"
         />
-      </div>
-      <p v-if="errorMsg" class="auth-error">{{ errorMsg }}</p>
-      <button class="auth-btn" @click="verify" :disabled="!inputName.trim()">
+      </view>
+      <text v-if="errorMsg" class="auth-error">{{ errorMsg }}</text>
+      <button class="auth-btn" :disabled="!inputName.trim()" @click="verify">
         进入
       </button>
-    </div>
-  </div>
+    </view>
+  </view>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { storage } from '../shared/storage'
+import { storage } from '@/shared/storage'
 
 const CORRECT_NAME = '何与青'
 const AUTH_KEY = 'baby_auth_verified'
 
-const isAuthenticated = ref(false)
 const inputName = ref('')
 const errorMsg = ref('')
 
 onMounted(() => {
-  // 检查本地存储中是否已验证
+  console.log('[auth] onMounted')
   const verified = storage.get(AUTH_KEY)
+  console.log('[auth] verified:', verified)
   if (verified === 'true') {
-    isAuthenticated.value = true
+    goHome()
   }
 })
 
@@ -49,70 +47,73 @@ function verify() {
 
   if (name === CORRECT_NAME) {
     storage.set(AUTH_KEY, 'true')
-    isAuthenticated.value = true
     errorMsg.value = ''
+    goHome()
   } else {
     errorMsg.value = '名字不对哦，请再试一次'
     inputName.value = ''
   }
 }
+
+function goHome() {
+  uni.reLaunch({ url: '/pages/index/index' })
+}
 </script>
 
 <style scoped>
-.auth-container {
-  min-height: 100vh;
-}
-
 .auth-wall {
   min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 40rpx;
   background: linear-gradient(135deg, #fce7f3 0%, #fbcfe8 25%, #fae8ff 50%, #fde2e4 75%, #fce7f3 100%);
 }
 
 .auth-box {
   background: white;
-  border-radius: 24px;
-  padding: 40px 32px;
+  border-radius: 48rpx;
+  padding: 80rpx 64rpx;
   width: 100%;
-  max-width: 320px;
+  max-width: 640rpx;
   text-align: center;
-  box-shadow: 0 20px 60px rgba(236, 72, 153, 0.15);
+  box-shadow: 0 40rpx 120rpx rgba(236, 72, 153, 0.15);
 }
 
 .auth-icon {
-  font-size: 48px;
-  margin-bottom: 16px;
+  font-size: 96rpx;
+  margin-bottom: 32rpx;
 }
 
 .auth-title {
-  font-size: 20px;
+  display: block;
+  font-size: 40rpx;
   font-weight: 600;
   color: #374151;
-  margin-bottom: 8px;
+  margin-bottom: 16rpx;
 }
 
 .auth-desc {
-  font-size: 14px;
+  display: block;
+  font-size: 28rpx;
   color: #9ca3af;
-  margin-bottom: 24px;
+  margin-bottom: 48rpx;
 }
 
 .auth-input-wrapper {
-  margin-bottom: 12px;
+  margin-bottom: 24rpx;
 }
 
 .auth-input {
   width: 100%;
-  padding: 14px 16px;
-  font-size: 16px;
-  border: 2px solid #f3f4f6;
-  border-radius: 12px;
+  height: 96rpx;
+  padding: 28rpx 32rpx;
+  font-size: 32rpx;
+  border: 4rpx solid #f3f4f6;
+  border-radius: 24rpx;
   text-align: center;
   outline: none;
-  transition: all 0.2s;
+  background: white;
   box-sizing: border-box;
 }
 
@@ -122,31 +123,29 @@ function verify() {
 }
 
 .auth-error {
-  font-size: 13px;
+  display: block;
+  font-size: 26rpx;
   color: #ef4444;
-  margin-bottom: 16px;
+  margin-bottom: 32rpx;
 }
 
 .auth-btn {
   width: 100%;
-  padding: 14px 24px;
-  font-size: 16px;
+  height: 96rpx;
+  line-height: 96rpx;
+  font-size: 32rpx;
   font-weight: 600;
   color: white;
   background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
   border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  transition: all 0.2s;
+  border-radius: 24rpx;
 }
 
-.auth-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(236, 72, 153, 0.3);
-}
-
-.auth-btn:disabled {
+.auth-btn[disabled] {
   opacity: 0.5;
-  cursor: not-allowed;
+}
+
+.auth-btn::after {
+  border: none;
 }
 </style>

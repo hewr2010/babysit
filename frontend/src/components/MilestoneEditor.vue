@@ -75,8 +75,8 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useModalStore } from '../stores/modal'
-
-const API_BASE = '/api'
+import { API_BASE } from '../shared/api'
+import { request } from '../shared/request'
 
 const modalStore = useModalStore()
 const visible = ref(false)
@@ -102,8 +102,7 @@ watch(() => modalStore.milestoneEditor, (val) => {
 async function fetchExistingMilestones() {
   if (!photo.value) return
   try {
-    const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(photo.value.name)}`)
-    existingMilestones.value = await res.json()
+    existingMilestones.value = await request(`${API_BASE}/milestones/${encodeURIComponent(photo.value.name)}`)
   } catch (e) {
     console.error('Failed to fetch milestones:', e)
   }
@@ -114,30 +113,24 @@ async function save() {
 
   saving.value = true
   try {
-    const res = await fetch(`${API_BASE}/milestones`, {
+    await request(`${API_BASE}/milestones`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      data: {
         media_filename: photo.value.name,
         title: title.value.trim(),
         description: description.value.trim() || null
-      })
+      }
     })
 
-    if (res.ok) {
-      // 清空表单并刷新列表
-      title.value = ''
-      description.value = ''
-      await fetchExistingMilestones()
-      // 可以在这里触发一个全局事件来刷新时间轴
-      window.dispatchEvent(new CustomEvent('milestone-updated'))
-    } else {
-      const err = await res.json()
-      alert(err.error || '保存失败')
-    }
+    // 清空表单并刷新列表
+    title.value = ''
+    description.value = ''
+    await fetchExistingMilestones()
+    // 可以在这里触发一个全局事件来刷新时间轴
+    window.dispatchEvent(new CustomEvent('milestone-updated'))
   } catch (e) {
     console.error('Failed to save milestone:', e)
-    alert('保存失败，请稍后重试')
+    alert(e.message || '保存失败，请稍后重试')
   } finally {
     saving.value = false
   }
@@ -147,17 +140,12 @@ async function deleteMilestone(id) {
   if (!confirm('确定要删除这个时刻吗？')) return
 
   try {
-    const res = await fetch(`${API_BASE}/milestones/${id}`, {
-      method: 'DELETE'
-    })
-
-    if (res.ok) {
-      await fetchExistingMilestones()
-      window.dispatchEvent(new CustomEvent('milestone-updated'))
-    }
+    await request(`${API_BASE}/milestones/${id}`, { method: 'DELETE' })
+    await fetchExistingMilestones()
+    window.dispatchEvent(new CustomEvent('milestone-updated'))
   } catch (e) {
     console.error('Failed to delete milestone:', e)
-    alert('删除失败')
+    alert(e.message || '删除失败')
   }
 }
 

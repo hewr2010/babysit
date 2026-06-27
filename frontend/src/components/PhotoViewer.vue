@@ -112,9 +112,9 @@ import { ref, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
+import { API_BASE } from '../shared/api'
+import { request } from '../shared/request'
 import SlideContent from './SlideContent.vue'
-
-const API_BASE = '/api'
 
 const store = useAppStore()
 const modalStore = useModalStore()
@@ -170,10 +170,8 @@ async function loadMilestones() {
     return
   }
   try {
-    const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(currentPhoto.value.name)}`)
-    if (res.ok) {
-      milestones.value = await res.json()
-    }
+    const data = await request(`${API_BASE}/milestones/${encodeURIComponent(currentPhoto.value.name)}`)
+    milestones.value = data || []
   } catch (e) {
     console.error('Failed to load milestones:', e)
   }

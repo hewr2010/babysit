@@ -1,3 +1,5 @@
 __pycache__
 .baidu_auth_code
 test_*.png
+frontend-mp/node_modules
+frontend-mp/dist

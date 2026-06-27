@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import unquote, quote
 
 from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, redirect, Response
+from flask_cors import CORS
 from PIL import Image
 
 from .config import DATA_DIR, CACHE_DIR
@@ -35,6 +36,14 @@ def create_app():
 
     app.teardown_appcontext(close_db)
     init_db()
+
+    # 允许 H5 和小程序跨域访问 API
+    CORS(app, origins=[
+        r"https://qqing\.top",
+        r"https://.*\.qqing\.top",
+        r"http://localhost(:\d+)?",
+        r"http://127\.0\.0\.1(:\d+)?"
+    ], supports_credentials=True)
 
     @app.route("/")
     def index():
