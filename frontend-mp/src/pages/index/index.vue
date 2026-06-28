@@ -28,6 +28,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { MEDIA_HOST } from '@/platform'
 import Header from '@/components/Header.vue'
 import GrowthSection from '@/components/GrowthSection.vue'
 import PhotoSection from '@/components/PhotoSection.vue'
@@ -86,10 +87,33 @@ function showRecordOptions() {
   })
 }
 
+function videoUrl(filename) {
+  const lowerName = filename.toLowerCase()
+  if (lowerName.endsWith('.livp')) {
+    return `${MEDIA_HOST}/livp/${encodeURIComponent(filename)}`
+  }
+  return `${MEDIA_HOST}/video/${encodeURIComponent(filename)}`
+}
+
 function openPhotoViewer(index) {
   if (!store.photos.length) return
-  uni.navigateTo({
-    url: `/pages/viewer/viewer?index=${index}`
+  const sources = store.photos.map(p => {
+    if (p.type === 'video') {
+      return {
+        url: videoUrl(p.name),
+        type: 'video',
+        poster: `${MEDIA_HOST}/thumb/${encodeURIComponent(p.name)}`
+      }
+    }
+    return {
+      url: `${MEDIA_HOST}/preview/${encodeURIComponent(p.name)}`,
+      type: 'image'
+    }
+  })
+  uni.previewMedia({
+    sources,
+    current: index,
+    showmenu: true
   })
 }
 </script>

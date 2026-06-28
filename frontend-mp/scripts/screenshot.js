@@ -74,16 +74,6 @@ async function screenshot(miniProgram, name) {
         await screenshot(miniProgram, 'photos_expanded')
       }
 
-      // 3.6 点击照片打开新的预览页
-      const firstPhoto = await indexPage.$('.photo-item')
-      if (firstPhoto) {
-        await firstPhoto.tap()
-        await sleep(2500)
-        await screenshot(miniProgram, 'viewer')
-        // 返回首页
-        await miniProgram.navigateBack({ delta: 1 })
-        await sleep(1500)
-      }
     }
 
     // 4. 点击宝宝卡片打开宝宝弹窗
