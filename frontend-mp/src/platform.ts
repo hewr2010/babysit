@@ -71,7 +71,7 @@ export function initPlatform() {
     getQuery() {
       const pages = getCurrentPages()
       const current = pages[pages.length - 1]
-      const query = current ? current.options || {} : {}
+      const query = current ? (current as any).options || {} : {}
       const pairs = Object.entries(query)
         .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
       return pairs.length > 0 ? `?${pairs.join('&')}` : ''
