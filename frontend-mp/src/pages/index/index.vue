@@ -97,7 +97,23 @@ function videoUrl(filename) {
 
 function openPhotoViewer(index) {
   if (!store.photos.length) return
-  const sources = store.photos.map(p => {
+
+  // uni.previewMedia 最多支持 50 个 source，取当前项附近的窗口
+  const total = store.photos.length
+  const MAX_SOURCES = 50
+  let start = 0
+  let end = total
+  if (total > MAX_SOURCES) {
+    const half = Math.floor(MAX_SOURCES / 2)
+    start = Math.max(0, index - half)
+    end = Math.min(total, start + MAX_SOURCES)
+    if (end - start < MAX_SOURCES) {
+      start = Math.max(0, end - MAX_SOURCES)
+    }
+  }
+
+  const windowed = store.photos.slice(start, end)
+  const sources = windowed.map(p => {
     if (p.type === 'video') {
       return {
         url: videoUrl(p.name),
@@ -110,10 +126,13 @@ function openPhotoViewer(index) {
       type: 'image'
     }
   })
+
   uni.previewMedia({
     sources,
-    current: index,
-    showmenu: true
+    current: index - start,
+    showmenu: true,
+    success: () => console.log('[previewMedia] success'),
+    fail: (err) => console.error('[previewMedia] fail', err)
   })
 }
 </script>

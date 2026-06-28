@@ -74,6 +74,15 @@ async function screenshot(miniProgram, name) {
         await screenshot(miniProgram, 'photos_expanded')
       }
 
+      // 3.6 点击照片触发 uni.previewMedia，验证调用成功
+      const firstPhoto = await indexPage.$('.photo-item')
+      if (firstPhoto) {
+        await firstPhoto.tap()
+        await sleep(2500)
+        // 原生预览层会遮住页面，自动化无法关闭，直接截图当前状态
+        await screenshot(miniProgram, 'preview_media')
+      }
+
     }
 
     // 4. 点击宝宝卡片打开宝宝弹窗
