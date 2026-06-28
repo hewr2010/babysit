@@ -28,6 +28,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { MEDIA_HOST } from '@/platform'
 import Header from '@/components/Header.vue'
 import GrowthSection from '@/components/GrowthSection.vue'
 import PhotoSection from '@/components/PhotoSection.vue'
@@ -88,9 +89,27 @@ function showRecordOptions() {
 
 function openPhotoViewer(index) {
   if (!store.photos.length) return
-  uni.navigateTo({
-    url: `/pages/viewer/viewer?index=${index}`
-  })
+  const item = store.photos[index]
+  if (!item) return
+
+  if (item.type === 'video') {
+    const lowerName = item.name.toLowerCase()
+    const videoUrl = lowerName.endsWith('.livp')
+      ? `${MEDIA_HOST}/livp/${encodeURIComponent(item.name)}`
+      : `${MEDIA_HOST}/video/${encodeURIComponent(item.name)}`
+    uni.navigateTo({
+      url: `/pages/video/video?url=${encodeURIComponent(videoUrl)}&name=${encodeURIComponent(item.name)}`
+    })
+    return
+  }
+
+  // 只把照片传入 swiper 预览
+  const photoIndex = store.photos.filter(p => p.type === 'photo').findIndex(p => p.name === item.name)
+  if (photoIndex >= 0) {
+    uni.navigateTo({
+      url: `/pages/viewer/viewer?index=${photoIndex}`
+    })
+  }
 }
 </script>
 

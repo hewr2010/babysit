@@ -74,34 +74,48 @@ async function screenshot(miniProgram, name) {
         await screenshot(miniProgram, 'photos_expanded')
       }
 
-      // 3.6 打开预览页并定位到第一张真正的照片（跳过前 19 个视频）
-      const photoIndex = await miniProgram.evaluate(() => {
+      // 3.6 多测几个照片和视频的预览，避免音频串扰
+      const mediaIndices = await miniProgram.evaluate(() => {
         const app = getApp()
         const store = app?.$vm?.$pinia?.state?.value?.app
-        if (!store) return -1
-        return store.photos.findIndex(p => p.type === 'photo')
+        if (!store) return { photos: [], videos: [] }
+        const photos = store.photos
+          .map((p, i) => ({ ...p, originalIndex: i }))
+          .filter(p => p.type === 'photo')
+          .slice(0, 3)
+          .map((p, i) => ({ originalIndex: p.originalIndex, photoIndex: i, name: p.name }))
+        const videos = store.photos
+          .map((p, i) => ({ ...p, originalIndex: i }))
+          .filter(p => p.type === 'video')
+          .slice(0, 3)
+          .map(p => ({ originalIndex: p.originalIndex, name: p.name }))
+        return { photos, videos }
       })
-      if (photoIndex >= 0) {
-        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${photoIndex}`)
-        await sleep(3000)
-        await screenshot(miniProgram, 'viewer_photo')
+
+      const { MEDIA_HOST } = await miniProgram.evaluate(() => {
+        return { MEDIA_HOST: 'https://qqing.top' }
+      })
+
+      for (let i = 0; i < mediaIndices.photos.length; i++) {
+        const p = mediaIndices.photos[i]
+        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${p.photoIndex}`)
+        await sleep(2500)
+        await screenshot(miniProgram, `viewer_photo_${i}`)
         await miniProgram.navigateBack({ delta: 1 })
-        await sleep(1500)
+        await sleep(800)
       }
 
-      // 3.7 打开预览页并定位到第一个视频
-      const videoIndex = await miniProgram.evaluate(() => {
-        const app = getApp()
-        const store = app?.$vm?.$pinia?.state?.value?.app
-        if (!store) return -1
-        return store.photos.findIndex(p => p.type === 'video')
-      })
-      if (videoIndex >= 0) {
-        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${videoIndex}`)
-        await sleep(3000)
-        await screenshot(miniProgram, 'viewer_video')
+      for (let i = 0; i < mediaIndices.videos.length; i++) {
+        const v = mediaIndices.videos[i]
+        const lowerName = v.name.toLowerCase()
+        const videoUrl = lowerName.endsWith('.livp')
+          ? `${MEDIA_HOST}/livp/${encodeURIComponent(v.name)}`
+          : `${MEDIA_HOST}/video/${encodeURIComponent(v.name)}`
+        await miniProgram.navigateTo(`/pages/video/video?url=${encodeURIComponent(videoUrl)}&name=${encodeURIComponent(v.name)}`)
+        await sleep(2500)
+        await screenshot(miniProgram, `viewer_video_${i}`)
         await miniProgram.navigateBack({ delta: 1 })
-        await sleep(1500)
+        await sleep(800)
       }
 
     }

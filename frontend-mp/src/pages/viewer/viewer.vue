@@ -5,21 +5,20 @@
         <text class="back-icon">←</text>
         <text class="back-text">返回</text>
       </view>
-      <text class="viewer-title">{{ currentIndex + 1 }} / {{ mediaList.length }}</text>
+      <text class="viewer-title">{{ currentIndex + 1 }} / {{ photoList.length }}</text>
       <view class="header-placeholder"></view>
     </view>
 
     <swiper
       class="viewer-swiper"
       :current="currentIndex"
-      :circular="mediaList.length > 2"
+      :circular="photoList.length > 2"
       @change="onSwiperChange"
       @touchstart="onTouchStart"
-      @touchmove="onTouchMove"
       @touchend="onTouchEnd"
     >
       <swiper-item
-        v-for="(item, i) in mediaList"
+        v-for="(item, i) in photoList"
         :key="item.name"
         class="swiper-item"
       >
@@ -27,41 +26,20 @@
           v-if="isInWindow(i)"
           class="media-wrapper"
         >
-          <!-- 占位缩略图，立即显示 -->
+          <!-- 模糊缩略图占位，立刻显示 -->
           <image
             :src="thumbUrl(item.name)"
             mode="aspectFill"
             class="media-thumb"
           />
-
-          <!-- 图片：铺满屏幕 -->
-          <template v-if="item.type === 'photo'">
-            <image
-              :src="previewUrl(item.name)"
-              mode="aspectFill"
-              class="media-image"
-              lazy-load
-              @load="onImageLoad(i)"
-            />
-          </template>
-
-          <!-- 视频：当前项才渲染 video，其他只显示封面 -->
-          <template v-else>
-            <video
-              v-if="i === currentIndex"
-              :src="videoUrl(item.name)"
-              :poster="thumbUrl(item.name)"
-              :controls="true"
-              :show-center-play-btn="true"
-              :enable-progress-gesture="true"
-              :object-fit="'cover'"
-              class="media-video"
-              autoplay
-            />
-            <view v-else class="video-cover">
-              <text class="play-icon">▶</text>
-            </view>
-          </template>
+          <!-- 清晰预览图，铺满全屏 -->
+          <image
+            :src="previewUrl(item.name)"
+            mode="aspectFill"
+            class="media-image"
+            lazy-load
+            @load="onImageLoad(i)"
+          />
         </view>
       </swiper-item>
     </swiper>
@@ -91,8 +69,8 @@ const safeTop = ref(44)
 const isSaving = ref(false)
 const loadedSet = ref(new Set())
 
-const mediaList = computed(() => store.photos)
-const currentItem = computed(() => mediaList.value[currentIndex.value])
+const photoList = computed(() => store.photos.filter(p => p.type === 'photo'))
+const currentItem = computed(() => photoList.value[currentIndex.value])
 
 onLoad((options) => {
   if (options.index) {
@@ -118,14 +96,6 @@ function previewUrl(filename) {
   return `${MEDIA_HOST}/preview/${encodeURIComponent(filename)}`
 }
 
-function videoUrl(filename) {
-  const lowerName = filename.toLowerCase()
-  if (lowerName.endsWith('.livp')) {
-    return `${MEDIA_HOST}/livp/${encodeURIComponent(filename)}`
-  }
-  return `${MEDIA_HOST}/video/${encodeURIComponent(filename)}`
-}
-
 function isInWindow(i) {
   return Math.abs(i - currentIndex.value) <= 1
 }
@@ -141,13 +111,13 @@ function onImageLoad(i) {
 }
 
 function preloadWindow(center) {
-  const total = mediaList.value.length
+  const total = photoList.value.length
   const preloadList = []
   for (let offset = -1; offset <= 2; offset++) {
     const idx = center + offset
     if (idx < 0 || idx >= total) continue
-    const item = mediaList.value[idx]
-    if (item && item.type === 'photo' && !loadedSet.value.has(idx)) {
+    const item = photoList.value[idx]
+    if (item && !loadedSet.value.has(idx)) {
       preloadList.push(previewUrl(item.name))
     }
   }
@@ -171,21 +141,12 @@ async function saveCurrent() {
 
   isSaving.value = true
   try {
-    const url = currentItem.value.type === 'video'
-      ? videoUrl(currentItem.value.name)
-      : previewUrl(currentItem.value.name)
-
+    const url = previewUrl(currentItem.value.name)
     const { tempFilePath } = await uni.downloadFile({ url })
-
-    if (currentItem.value.type === 'video') {
-      await uni.saveVideoToPhotosAlbum({ filePath: tempFilePath })
-    } else {
-      await uni.saveImageToPhotosAlbum({ filePath: tempFilePath })
-    }
-
+    await uni.saveImageToPhotosAlbum({ filePath: tempFilePath })
     uni.showToast({ title: '已保存', icon: 'success' })
   } catch (e) {
-    console.error('Failed to save media:', e)
+    console.error('Failed to save photo:', e)
     uni.showToast({ title: '保存失败，请授权相册权限', icon: 'none' })
   } finally {
     isSaving.value = false
@@ -201,10 +162,6 @@ function onTouchStart(e) {
   touchStartY = e.touches[0].clientY
   touchStartX = e.touches[0].clientX
   touchStartTime = Date.now()
-}
-
-function onTouchMove(e) {
-  // swiper 内部处理横向滑动
 }
 
 function onTouchEnd(e) {
@@ -287,9 +244,7 @@ function onTouchEnd(e) {
 }
 
 .media-thumb,
-.media-image,
-.media-video,
-.video-cover {
+.media-image {
   position: absolute;
   top: 0;
   left: 0;
@@ -305,24 +260,6 @@ function onTouchEnd(e) {
 
 .media-image {
   z-index: 2;
-}
-
-.media-video {
-  z-index: 2;
-}
-
-.video-cover {
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.play-icon {
-  color: white;
-  font-size: 80rpx;
-  text-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.5);
 }
 
 .viewer-footer {
