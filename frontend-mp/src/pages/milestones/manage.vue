@@ -3,10 +3,10 @@
     <scroll-view scroll-x class="month-scroll" show-scrollbar="false">
       <view class="month-list">
         <view
-          v-for="month in availableMonths"
+          v-for="(month, idx) in availableMonths"
           :key="month.key"
           class="month-item"
-          :class="{ active: selectedMonth === month.key }"
+          :class="{ active: selectedMonth === month.key, first: idx === 0, last: idx === availableMonths.length - 1 }"
           @click="selectMonth(month.key)"
         >
           <text class="month-label">{{ month.label }}</text>
@@ -40,7 +40,9 @@
       <view class="editor-sheet">
         <view class="editor-header">
           <text class="editor-title">⭐ 标记重要时刻</text>
-          <text class="close-btn" @click="closeEditor">✕</text>
+          <view class="close-btn" @click="closeEditor">
+            <text>✕</text>
+          </view>
         </view>
 
         <image
@@ -267,14 +269,13 @@ async function deleteMilestone(id) {
 
 .month-scroll {
   background: white;
-  padding: 24rpx 0;
+  padding: 24rpx 32rpx;
   border-bottom: 2rpx solid rgba(0, 0, 0, 0.06);
 }
 
 .month-list {
-  display: inline-flex;
+  display: flex;
   gap: 16rpx;
-  padding: 0 32rpx;
 }
 
 .month-item {
@@ -285,6 +286,16 @@ async function deleteMilestone(id) {
   background: #f3f4f6;
   border-radius: 32rpx;
   white-space: nowrap;
+  min-height: 56rpx;
+  box-sizing: border-box;
+}
+
+.month-item.first {
+  margin-left: 0;
+}
+
+.month-item.last {
+  margin-right: 32rpx;
 }
 
 .month-item.active {
@@ -316,7 +327,8 @@ async function deleteMilestone(id) {
 
 .photo-scroll {
   flex: 1;
-  padding: 24rpx;
+  padding: 24rpx 32rpx;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
 }
 
 .photo-grid {
@@ -439,7 +451,8 @@ async function deleteMilestone(id) {
 }
 
 .form-group {
-  margin-bottom: 32rpx;
+  margin-bottom: 24rpx;
+  padding-bottom: 28rpx;
   position: relative;
 }
 
@@ -467,7 +480,7 @@ async function deleteMilestone(id) {
 .char-count {
   position: absolute;
   right: 16rpx;
-  bottom: -32rpx;
+  bottom: 4rpx;
   font-size: 20rpx;
   color: #9ca3af;
 }

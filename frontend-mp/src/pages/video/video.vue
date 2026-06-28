@@ -14,10 +14,15 @@
     <video
       :src="videoUrl"
       :title="videoName"
-      autoplay
+      :poster="posterUrl"
+      object-fit="cover"
       controls
       class="video-player"
+      @error="onVideoError"
     />
+    <view v-if="videoError" class="video-error">
+      <text>{{ videoError }}</text>
+    </view>
     <view class="video-info">
       <text class="video-name">{{ videoName }}</text>
       <button class="save-btn" :disabled="saving" @click="saveVideo">
@@ -29,13 +34,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { MEDIA_HOST } from '@/platform'
 
 const videoUrl = ref('')
 const videoName = ref('')
 const saving = ref(false)
 const safeTop = ref(44)
+const videoError = ref('')
+
+const posterUrl = computed(() => {
+  if (!videoName.value) return ''
+  return `${MEDIA_HOST}/thumb/${encodeURIComponent(videoName.value)}`
+})
 
 onLoad((options) => {
   if (options.url) {
@@ -57,6 +69,11 @@ onMounted(() => {
 
 function goBack() {
   uni.navigateBack({ delta: 1 })
+}
+
+function onVideoError(e) {
+  videoError.value = '视频加载失败，请检查网络或重试'
+  console.error('[video] load error:', e)
 }
 
 async function saveVideo() {
@@ -82,6 +99,7 @@ async function saveVideo() {
   background: black;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .nav-bar {
@@ -136,13 +154,28 @@ async function saveVideo() {
   min-height: 60vh;
 }
 
+.video-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  font-size: 28rpx;
+  text-align: center;
+  padding: 24rpx;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 16rpx;
+}
+
 .video-info {
   width: 100%;
   padding: 40rpx;
+  padding-bottom: calc(40rpx + env(safe-area-inset-bottom));
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 24rpx;
+  box-sizing: border-box;
 }
 
 .video-name {

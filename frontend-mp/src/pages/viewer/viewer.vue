@@ -12,7 +12,6 @@
     <swiper
       class="viewer-swiper"
       :current="currentIndex"
-      :circular="photoList.length > 2"
       @change="onSwiperChange"
       @touchstart="onTouchStart"
       @touchend="onTouchEnd"
@@ -31,14 +30,15 @@
             :src="thumbUrl(item.name)"
             mode="aspectFill"
             class="media-thumb"
+            @error="onThumbError(i)"
           />
           <!-- 清晰预览图，铺满全屏 -->
           <image
             :src="previewUrl(item.name)"
             mode="aspectFill"
             class="media-image"
-            lazy-load
             @load="onImageLoad(i)"
+            @error="onImageError(i)"
           />
         </view>
       </swiper-item>
@@ -46,9 +46,7 @@
 
     <view class="viewer-footer">
       <text v-if="currentItem?.date || currentItem?.time" class="media-meta">
-        <text v-if="currentItem?.date">{{ currentItem.date }}</text>
-        <text v-if="currentItem?.date && currentItem?.time"> · </text>
-        <text v-if="currentItem?.time">{{ currentItem.time }}</text>
+        {{ [currentItem?.date, currentItem?.time].filter(Boolean).join(' · ') }}
       </text>
       <view class="save-btn" :class="{ saving: isSaving }" @click="saveCurrent">
         <text>{{ isSaving ? '保存中...' : '保存到相册' }}</text>
@@ -68,6 +66,7 @@ const currentIndex = ref(0)
 const safeTop = ref(44)
 const isSaving = ref(false)
 const loadedSet = ref(new Set())
+const errorSet = ref(new Set())
 
 const photoList = computed(() => store.photos.filter(p => p.type === 'photo'))
 const currentItem = computed(() => photoList.value[currentIndex.value])
@@ -108,6 +107,17 @@ function onSwiperChange(e) {
 
 function onImageLoad(i) {
   loadedSet.value.add(i)
+  errorSet.value.delete(i)
+}
+
+function onImageError(i) {
+  errorSet.value.add(`preview-${i}`)
+  console.error(`[viewer] preview image load error at index ${i}`)
+}
+
+function onThumbError(i) {
+  errorSet.value.add(`thumb-${i}`)
+  console.error(`[viewer] thumb image load error at index ${i}`)
 }
 
 function preloadWindow(center) {
@@ -141,7 +151,7 @@ async function saveCurrent() {
 
   isSaving.value = true
   try {
-    const url = previewUrl(currentItem.value.name)
+    const url = `${MEDIA_HOST}/api/download/${encodeURIComponent(currentItem.value.name)}`
     const { tempFilePath } = await uni.downloadFile({ url })
     await uni.saveImageToPhotosAlbum({ filePath: tempFilePath })
     uni.showToast({ title: '已保存', icon: 'success' })
@@ -177,10 +187,11 @@ function onTouchEnd(e) {
 
 <style scoped>
 .viewer-page {
-  min-height: 100vh;
+  height: 100vh;
   background: black;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .viewer-header {
@@ -263,18 +274,24 @@ function onTouchEnd(e) {
 }
 
 .viewer-footer {
-  padding: 24rpx 32rpx calc(24rpx + env(safe-area-inset-bottom));
+  padding: 24rpx 32rpx calc(48rpx + env(safe-area-inset-bottom));
   background: rgba(0, 0, 0, 0.4);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24rpx;
+  flex-shrink: 0;
+  min-height: 112rpx;
+  box-sizing: border-box;
 }
 
 .media-meta {
   color: rgba(255, 255, 255, 0.85);
   font-size: 24rpx;
   flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .save-btn {
@@ -286,6 +303,7 @@ function onTouchEnd(e) {
   text-align: center;
   font-weight: 500;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .save-btn.saving {

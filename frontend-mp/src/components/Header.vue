@@ -183,11 +183,11 @@ function openBabyModal() {
 .quick-stats {
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
+  align-self: center;
   gap: 16rpx;
   background: rgba(255, 255, 255, 0.6);
   backdrop-filter: blur(8rpx);
-  padding: 16rpx 20rpx;
+  padding: 16rpx 32rpx;
   border-radius: 32rpx;
   border: 2rpx solid rgba(255, 255, 255, 0.5);
 }
@@ -197,7 +197,8 @@ function openBabyModal() {
   flex-direction: column;
   align-items: center;
   gap: 4rpx;
-  min-width: 60rpx;
+  flex: 1;
+  min-width: 72rpx;
 }
 
 .stat-value {
@@ -218,5 +219,6 @@ function openBabyModal() {
   width: 2rpx;
   height: 40rpx;
   background: linear-gradient(180deg, transparent, rgba(236, 72, 153, 0.3), transparent);
+  flex-shrink: 0;
 }
 </style>

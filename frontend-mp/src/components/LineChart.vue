@@ -48,7 +48,8 @@ function initCanvas() {
     const sys = uni.getSystemInfoSync()
     rpxRatio.value = sys.windowWidth / 750
     // 容器宽度 = 屏幕宽 - 两侧 padding（约 80rpx）
-    canvasWidth.value = Math.max(sys.windowWidth - 80 * rpxRatio.value, 200)
+    // 容器有 40rpx 内边距，再留 20rpx 呼吸边距，避免标签贴边
+    canvasWidth.value = Math.max(sys.windowWidth - 120 * rpxRatio.value, 200)
     canvasHeight.value = 440 * rpxRatio.value
   } catch (e) {
     rpxRatio.value = 0.5
@@ -82,7 +83,7 @@ function draw() {
 
   const W = canvasWidth.value
   const H = canvasHeight.value
-  const padding = { top: px(30), right: px(80), bottom: px(50), left: px(50) }
+  const padding = { top: px(30), right: px(110), bottom: px(50), left: px(50) }
   const chartW = W - padding.left - padding.right
   const chartH = H - padding.top - padding.bottom
 

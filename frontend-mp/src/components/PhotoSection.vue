@@ -48,7 +48,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { MEDIA_HOST } from '@/platform'
 
@@ -56,6 +56,11 @@ const store = useAppStore()
 const emit = defineEmits(['openPhoto'])
 
 const expandedDates = ref(new Set())
+
+// 切换月份后清空展开状态
+watch(() => store.monthDisplay, () => {
+  expandedDates.value.clear()
+})
 
 const sortedPhotosByDate = computed(() => {
   const dates = Object.keys(store.photosByDate).sort().reverse()

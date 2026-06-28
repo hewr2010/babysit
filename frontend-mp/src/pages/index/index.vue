@@ -135,7 +135,6 @@ function openPhotoViewer(index) {
 
 .main-scroll {
   height: 100vh;
-  padding-bottom: 128rpx;
 }
 
 .main-content {
@@ -146,6 +145,6 @@ function openPhotoViewer(index) {
 }
 
 .safe-area {
-  height: 160rpx;
+  height: calc(160rpx + env(safe-area-inset-bottom));
 }
 </style>

@@ -145,6 +145,7 @@ function goManage() {
   display: inline-flex;
   gap: 20rpx;
   padding-bottom: 8rpx;
+  padding-right: 40rpx;
 }
 
 .milestone-card {
