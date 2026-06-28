@@ -5,6 +5,7 @@
       id="growth-chart"
       class="chart-canvas"
       :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
+      @tap="onTap"
     />
   </view>
 </template>
@@ -31,15 +32,19 @@ const instance = getCurrentInstance()
 const canvasWidth = ref(300)
 const canvasHeight = ref(220)
 const rpxRatio = ref(0.5)
+const activeIndex = ref(-1)
 
 const hasHeight = computed(() => props.heightData.some(v => v != null))
 const hasWeight = computed(() => props.weightData.some(v => v != null))
+
+let chartGeom = null
 
 onMounted(() => {
   initCanvas()
 })
 
 watch(() => [props.dates, props.heightData, props.weightData], () => {
+  activeIndex.value = -1
   nextTick(() => draw())
 }, { deep: true })
 
@@ -47,9 +52,8 @@ function initCanvas() {
   try {
     const sys = uni.getSystemInfoSync()
     rpxRatio.value = sys.windowWidth / 750
-    // 容器宽度 = 屏幕宽 - 两侧 padding（约 80rpx）
-    // 容器有 40rpx 内边距，再留 20rpx 呼吸边距，避免标签贴边
-    canvasWidth.value = Math.max(sys.windowWidth - 120 * rpxRatio.value, 200)
+    // 画布比容器再小一圈，确保标签不贴边；容器在 GrowthSection 里有 40rpx 内边距
+    canvasWidth.value = Math.max(sys.windowWidth - 140 * rpxRatio.value, 200)
     canvasHeight.value = 440 * rpxRatio.value
   } catch (e) {
     rpxRatio.value = 0.5
@@ -83,9 +87,16 @@ function draw() {
 
   const W = canvasWidth.value
   const H = canvasHeight.value
-  const padding = { top: px(30), right: px(110), bottom: px(50), left: px(50) }
+  const padding = {
+    top: px(50),
+    right: px(120),
+    bottom: px(60),
+    left: px(70)
+  }
   const chartW = W - padding.left - padding.right
   const chartH = H - padding.top - padding.bottom
+
+  chartGeom = { W, H, padding, chartW, chartH }
 
   // 清空
   ctx.clearRect(0, 0, W, H)
@@ -100,7 +111,7 @@ function draw() {
 
   // 绘制网格和 Y 轴标签
   ctx.lineWidth = 1
-  ctx.font = `${px(18)}px sans-serif`
+  ctx.font = `${px(20)}px sans-serif`
 
   // 左轴：身高
   if (hasHeight.value) {
@@ -124,7 +135,7 @@ function draw() {
     if (i === 0) ctx.textAlign = 'left'
     else if (i === xCount - 1) ctx.textAlign = 'right'
     else ctx.textAlign = 'center'
-    ctx.fillText(label, x, H - padding.bottom + px(24))
+    ctx.fillText(label, x, H - padding.bottom + px(30))
   })
 
   // 绘制折线
@@ -133,6 +144,11 @@ function draw() {
   }
   if (hasWeight.value) {
     drawLine(ctx, padding, chartW, chartH, props.weightData, weightMinMax, '#22c55e')
+  }
+
+  // 绘制高亮提示
+  if (activeIndex.value >= 0 && activeIndex.value < xCount) {
+    drawTooltip(ctx, padding, chartW, chartH, activeIndex.value, heightMinMax, weightMinMax)
   }
 
   ctx.draw()
@@ -152,6 +168,7 @@ function drawYAxis(ctx, padding, chartW, chartH, minMax, color, isLeft) {
   ctx.strokeStyle = color
   ctx.fillStyle = color
   ctx.textAlign = isLeft ? 'right' : 'left'
+  ctx.font = `${px(20)}px sans-serif`
 
   for (let i = 0; i <= steps; i++) {
     const ratio = i / steps
@@ -165,8 +182,8 @@ function drawYAxis(ctx, padding, chartW, chartH, minMax, color, isLeft) {
     ctx.stroke()
 
     // 标签
-    const x = isLeft ? padding.left - px(10) : padding.left + chartW + px(10)
-    ctx.fillText(formatValue(value), x, y + px(6))
+    const x = isLeft ? padding.left - px(12) : padding.left + chartW + px(12)
+    ctx.fillText(formatValue(value), x, y + px(7))
   }
 
   // 轴线
@@ -180,13 +197,12 @@ function drawLine(ctx, padding, chartW, chartH, data, minMax, color) {
   const xCount = data.length
   const points = []
 
-  // 先收集有效点坐标
   data.forEach((value, i) => {
     if (value == null) return
     const x = padding.left + (chartW / (xCount - 1 || 1)) * i
     const ratio = (value - minMax.min) / (minMax.max - minMax.min || 1)
     const y = padding.top + chartH - chartH * ratio
-    points.push({ x, y })
+    points.push({ x, y, value })
   })
 
   if (points.length < 1) return
@@ -208,9 +224,123 @@ function drawLine(ctx, padding, chartW, chartH, data, minMax, color) {
   // 绘制数据点
   points.forEach(p => {
     ctx.beginPath()
-    ctx.arc(p.x, p.y, 3, 0, Math.PI * 2)
+    ctx.arc(p.x, p.y, px(6), 0, Math.PI * 2)
     ctx.fill()
   })
+}
+
+function drawTooltip(ctx, padding, chartW, chartH, index, heightMinMax, weightMinMax) {
+  const xCount = props.dates.length
+  const x = padding.left + (chartW / (xCount - 1 || 1)) * index
+
+  // 竖线
+  ctx.strokeStyle = 'rgba(107, 114, 128, 0.4)'
+  ctx.lineWidth = 1
+  ctx.setLineDash([px(6), px(4)])
+  ctx.beginPath()
+  ctx.moveTo(x, padding.top)
+  ctx.lineTo(x, padding.top + chartH)
+  ctx.stroke()
+  ctx.setLineDash([])
+
+  // 高亮点
+  const heightValue = props.heightData[index]
+  const weightValue = props.weightData[index]
+  const radius = px(10)
+
+  if (heightValue != null) {
+    const ratio = (heightValue - heightMinMax.min) / (heightMinMax.max - heightMinMax.min || 1)
+    const y = padding.top + chartH - chartH * ratio
+    ctx.fillStyle = '#ec4899'
+    ctx.beginPath()
+    ctx.arc(x, y, radius, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 2
+    ctx.stroke()
+  }
+
+  if (weightValue != null) {
+    const ratio = (weightValue - weightMinMax.min) / (weightMinMax.max - weightMinMax.min || 1)
+    const y = padding.top + chartH - chartH * ratio
+    ctx.fillStyle = '#22c55e'
+    ctx.beginPath()
+    ctx.arc(x, y, radius, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 2
+    ctx.stroke()
+  }
+
+  // 提示卡片
+  const date = props.dates[index]
+  const lines = []
+  if (heightValue != null) lines.push({ text: `身高 ${formatValue(heightValue)} cm`, color: '#ec4899' })
+  if (weightValue != null) lines.push({ text: `体重 ${formatValue(weightValue)} g`, color: '#22c55e' })
+  if (!lines.length) return
+
+  const cardPadding = px(16)
+  const lineHeight = px(32)
+  ctx.font = `${px(22)}px sans-serif`
+  let maxWidth = 0
+  lines.forEach(line => {
+    const w = ctx.measureText(line.text).width
+    if (w > maxWidth) maxWidth = w
+  })
+  const dateWidth = ctx.measureText(date).width
+  if (dateWidth > maxWidth) maxWidth = dateWidth
+
+  const cardW = maxWidth + cardPadding * 2
+  const cardH = cardPadding * 2 + lineHeight * (lines.length + 1)
+  let cardX = x + px(16)
+  let cardY = padding.top + px(16)
+  if (cardX + cardW > padding.left + chartW) {
+    cardX = x - cardW - px(16)
+  }
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+  ctx.strokeStyle = 'rgba(236, 72, 153, 0.2)'
+  ctx.lineWidth = 1
+  roundRect(ctx, cardX, cardY, cardW, cardH, px(12))
+  ctx.fill()
+  ctx.stroke()
+
+  ctx.fillStyle = '#374151'
+  ctx.textAlign = 'left'
+  ctx.fillText(date, cardX + cardPadding, cardY + cardPadding + px(20))
+
+  lines.forEach((line, i) => {
+    ctx.fillStyle = line.color
+    ctx.fillText(line.text, cardX + cardPadding, cardY + cardPadding + lineHeight * (i + 1) + px(20))
+  })
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + w - r, y)
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r)
+  ctx.lineTo(x + w, y + h - r)
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
+  ctx.lineTo(x + r, y + h)
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r)
+  ctx.lineTo(x, y + r)
+  ctx.quadraticCurveTo(x, y, x + r, y)
+  ctx.closePath()
+}
+
+function onTap(e) {
+  if (!chartGeom) return
+  const { padding, chartW } = chartGeom
+  const touchX = e.detail.x
+  const xCount = props.dates.length
+  const chartLeft = padding.left
+  const relativeX = touchX - chartLeft
+  const step = chartW / (xCount - 1 || 1)
+  let index = Math.round(relativeX / step)
+  index = Math.max(0, Math.min(xCount - 1, index))
+  activeIndex.value = index
+  draw()
 }
 
 function formatValue(v) {

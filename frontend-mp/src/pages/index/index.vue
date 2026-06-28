@@ -93,22 +93,13 @@ function openPhotoViewer(index) {
   if (!item) return
 
   if (item.type === 'video') {
-    const lowerName = item.name.toLowerCase()
-    const videoUrl = lowerName.endsWith('.livp')
-      ? `${MEDIA_HOST}/livp/${encodeURIComponent(item.name)}`
-      : `${MEDIA_HOST}/video/${encodeURIComponent(item.name)}`
-    uni.navigateTo({
-      url: `/pages/video/video?url=${encodeURIComponent(videoUrl)}&name=${encodeURIComponent(item.name)}`
-    })
+    uni.navigateTo({ url: `/pages/video/video?index=${index}` })
     return
   }
 
-  // 只把照片传入 swiper 预览
   const photoIndex = store.photos.filter(p => p.type === 'photo').findIndex(p => p.name === item.name)
   if (photoIndex >= 0) {
-    uni.navigateTo({
-      url: `/pages/viewer/viewer?index=${photoIndex}`
-    })
+    uni.navigateTo({ url: `/pages/viewer/viewer?index=${photoIndex}` })
   }
 }
 </script>

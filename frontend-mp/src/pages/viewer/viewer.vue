@@ -9,47 +9,27 @@
       <view class="header-placeholder"></view>
     </view>
 
-    <swiper
-      class="viewer-swiper"
-      :current="currentIndex"
-      @change="onSwiperChange"
+    <view
+      class="viewer-stage"
       @touchstart="onTouchStart"
       @touchend="onTouchEnd"
     >
-      <swiper-item
-        v-for="(item, i) in photoList"
-        :key="item.name"
-        class="swiper-item"
-      >
-        <view
-          v-if="isInWindow(i)"
-          class="media-wrapper"
-        >
-          <!-- 模糊缩略图占位，立刻显示 -->
-          <image
-            :src="thumbUrl(item.name)"
-            mode="aspectFill"
-            class="media-thumb"
-            @error="onThumbError(i)"
-          />
-          <!-- 清晰预览图，铺满全屏 -->
-          <image
-            :src="previewUrl(item.name)"
-            mode="aspectFill"
-            class="media-image"
-            @load="onImageLoad(i)"
-            @error="onImageError(i)"
-          />
-        </view>
-      </swiper-item>
-    </swiper>
+      <PhotoSlide :filename="currentItem?.name" />
+
+      <view v-if="hasPrev" class="nav-overlay nav-prev" @click="goPrev">
+        <text class="nav-arrow">‹</text>
+      </view>
+      <view v-if="hasNext" class="nav-overlay nav-next" @click="goNext">
+        <text class="nav-arrow">›</text>
+      </view>
+    </view>
 
     <view class="viewer-footer">
       <text v-if="currentItem?.date || currentItem?.time" class="media-meta">
         {{ [currentItem?.date, currentItem?.time].filter(Boolean).join(' · ') }}
       </text>
       <view class="save-btn" :class="{ saving: isSaving }" @click="saveCurrent">
-        <text>{{ isSaving ? '保存中...' : '保存到相册' }}</text>
+        <text>{{ saveBtnText }}</text>
       </view>
     </view>
   </view>
@@ -59,17 +39,22 @@
 import { ref, computed, onMounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { useAppStore } from '@/stores/app'
-import { MEDIA_HOST } from '@/platform'
+import PhotoSlide from './PhotoSlide.vue'
 
 const store = useAppStore()
 const currentIndex = ref(0)
 const safeTop = ref(44)
 const isSaving = ref(false)
-const loadedSet = ref(new Set())
-const errorSet = ref(new Set())
 
 const photoList = computed(() => store.photos.filter(p => p.type === 'photo'))
 const currentItem = computed(() => photoList.value[currentIndex.value])
+const hasPrev = computed(() => currentIndex.value > 0)
+const hasNext = computed(() => currentIndex.value < photoList.value.length - 1)
+
+const saveBtnText = computed(() => {
+  if (isSaving.value) return '保存中...'
+  return '保存到相册'
+})
 
 onLoad((options) => {
   if (options.index) {
@@ -84,62 +69,35 @@ onMounted(() => {
   } catch (e) {
     // 使用默认值
   }
-  preloadWindow(currentIndex.value)
 })
 
-function thumbUrl(filename) {
-  return `${MEDIA_HOST}/thumb/${encodeURIComponent(filename)}`
+let touchStartX = 0
+let touchStartY = 0
+let touchStartTime = 0
+
+function onTouchStart(e) {
+  touchStartX = e.touches[0].clientX
+  touchStartY = e.touches[0].clientY
+  touchStartTime = Date.now()
 }
 
-function previewUrl(filename) {
-  return `${MEDIA_HOST}/preview/${encodeURIComponent(filename)}`
-}
-
-function isInWindow(i) {
-  return Math.abs(i - currentIndex.value) <= 1
-}
-
-function onSwiperChange(e) {
-  const newIndex = e.detail.current
-  currentIndex.value = newIndex
-  preloadWindow(newIndex)
-}
-
-function onImageLoad(i) {
-  loadedSet.value.add(i)
-  errorSet.value.delete(i)
-}
-
-function onImageError(i) {
-  errorSet.value.add(`preview-${i}`)
-  console.error(`[viewer] preview image load error at index ${i}`)
-}
-
-function onThumbError(i) {
-  errorSet.value.add(`thumb-${i}`)
-  console.error(`[viewer] thumb image load error at index ${i}`)
-}
-
-function preloadWindow(center) {
-  const total = photoList.value.length
-  const preloadList = []
-  for (let offset = -1; offset <= 2; offset++) {
-    const idx = center + offset
-    if (idx < 0 || idx >= total) continue
-    const item = photoList.value[idx]
-    if (item && !loadedSet.value.has(idx)) {
-      preloadList.push(previewUrl(item.name))
-    }
-  }
-  if (preloadList.length) {
-    preloadImages(preloadList)
+function onTouchEnd(e) {
+  const deltaX = e.changedTouches[0].clientX - touchStartX
+  const deltaY = e.changedTouches[0].clientY - touchStartY
+  const deltaTime = Date.now() - touchStartTime
+  if (deltaTime > 300 || Math.abs(deltaX) < 50) return
+  if (Math.abs(deltaX) > Math.abs(deltaY)) {
+    if (deltaX < 0) goNext()
+    else goPrev()
   }
 }
 
-function preloadImages(urls) {
-  urls.forEach(url => {
-    uni.downloadFile({ url, success: () => {} })
-  })
+function goPrev() {
+  if (currentIndex.value > 0) currentIndex.value--
+}
+
+function goNext() {
+  if (currentIndex.value < photoList.value.length - 1) currentIndex.value++
 }
 
 function goBack() {
@@ -151,6 +109,7 @@ async function saveCurrent() {
 
   isSaving.value = true
   try {
+    const { MEDIA_HOST } = await import('@/platform')
     const url = `${MEDIA_HOST}/api/download/${encodeURIComponent(currentItem.value.name)}`
     const { tempFilePath } = await uni.downloadFile({ url })
     await uni.saveImageToPhotosAlbum({ filePath: tempFilePath })
@@ -160,27 +119,6 @@ async function saveCurrent() {
     uni.showToast({ title: '保存失败，请授权相册权限', icon: 'none' })
   } finally {
     isSaving.value = false
-  }
-}
-
-// 下滑关闭手势
-let touchStartY = 0
-let touchStartX = 0
-let touchStartTime = 0
-
-function onTouchStart(e) {
-  touchStartY = e.touches[0].clientY
-  touchStartX = e.touches[0].clientX
-  touchStartTime = Date.now()
-}
-
-function onTouchEnd(e) {
-  const deltaY = e.changedTouches[0].clientY - touchStartY
-  const deltaX = e.changedTouches[0].clientX - touchStartX
-  const deltaTime = Date.now() - touchStartTime
-
-  if (deltaY > 80 && Math.abs(deltaX) < Math.abs(deltaY) * 0.5 && deltaTime < 300) {
-    goBack()
   }
 }
 </script>
@@ -234,43 +172,12 @@ function onTouchEnd(e) {
   width: 110rpx;
 }
 
-.viewer-swiper {
+.viewer-stage {
   flex: 1;
   width: 100%;
-  background: black;
-}
-
-.swiper-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.media-wrapper {
-  width: 100%;
-  height: 100%;
   position: relative;
-  background: #1a1a1a;
+  background: black;
   overflow: hidden;
-}
-
-.media-thumb,
-.media-image {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.media-thumb {
-  filter: blur(20rpx) brightness(0.6);
-  transform: scale(1.1);
-  z-index: 1;
-}
-
-.media-image {
-  z-index: 2;
 }
 
 .viewer-footer {
@@ -308,5 +215,30 @@ function onTouchEnd(e) {
 
 .save-btn.saving {
   opacity: 0.7;
+}
+
+.nav-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 120rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.nav-prev {
+  left: 0;
+}
+
+.nav-next {
+  right: 0;
+}
+
+.nav-arrow {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 64rpx;
+  font-weight: 300;
 }
 </style>

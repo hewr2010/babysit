@@ -6,25 +6,40 @@
           <text class="back-icon">←</text>
           <text class="back-text">返回</text>
         </view>
-        <text class="nav-title">视频播放</text>
+        <text class="nav-title">{{ currentIndex + 1 }} / {{ store.photos.length }}</text>
         <view class="nav-placeholder"></view>
       </view>
     </view>
 
-    <video
-      :src="videoUrl"
-      :title="videoName"
-      :poster="posterUrl"
-      object-fit="cover"
-      controls
-      class="video-player"
-      @error="onVideoError"
-    />
-    <view v-if="videoError" class="video-error">
-      <text>{{ videoError }}</text>
+    <view class="video-stage" @touchstart="onTouchStart" @touchend="onTouchEnd">
+      <video
+        :id="`video-${currentIndex}`"
+        :src="videoUrl"
+        :poster="posterUrl"
+        object-fit="cover"
+        autoplay
+        loop
+        controls
+        class="video-player"
+        @error="onVideoError"
+      />
+      <view v-if="videoError" class="video-error">
+        <text>{{ videoError }}</text>
+      </view>
+
+      <view class="nav-overlay nav-prev" @click="goPrev">
+        <text class="nav-arrow">‹</text>
+      </view>
+      <view class="nav-overlay nav-next" @click="goNext">
+        <text class="nav-arrow">›</text>
+      </view>
     </view>
+
     <view class="video-info">
-      <text class="video-name">{{ videoName }}</text>
+      <text class="video-name">{{ currentItem?.name }}</text>
+      <text v-if="currentItem?.date || currentItem?.time" class="video-meta">
+        {{ [currentItem?.date, currentItem?.time].filter(Boolean).join(' · ') }}
+      </text>
       <button class="save-btn" :disabled="saving" @click="saveVideo">
         <text v-if="saving" class="btn-spinner"></text>
         <text v-else>保存到相册</text>
@@ -34,27 +49,36 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
+import { useAppStore } from '@/stores/app'
 import { MEDIA_HOST } from '@/platform'
 
-const videoUrl = ref('')
-const videoName = ref('')
+const store = useAppStore()
+const currentIndex = ref(0)
 const saving = ref(false)
 const safeTop = ref(44)
 const videoError = ref('')
 
+const currentItem = computed(() => store.photos[currentIndex.value])
+
+const videoUrl = computed(() => {
+  if (!currentItem.value) return ''
+  const lowerName = currentItem.value.name.toLowerCase()
+  if (lowerName.endsWith('.livp')) {
+    return `${MEDIA_HOST}/livp/${encodeURIComponent(currentItem.value.name)}`
+  }
+  return `${MEDIA_HOST}/video/${encodeURIComponent(currentItem.value.name)}`
+})
+
 const posterUrl = computed(() => {
-  if (!videoName.value) return ''
-  return `${MEDIA_HOST}/thumb/${encodeURIComponent(videoName.value)}`
+  if (!currentItem.value) return ''
+  return `${MEDIA_HOST}/thumb/${encodeURIComponent(currentItem.value.name)}`
 })
 
 onLoad((options) => {
-  if (options.url) {
-    videoUrl.value = decodeURIComponent(options.url)
-  }
-  if (options.name) {
-    videoName.value = decodeURIComponent(options.name)
+  if (options.index) {
+    currentIndex.value = parseInt(options.index, 10) || 0
   }
 })
 
@@ -66,6 +90,50 @@ onMounted(() => {
     // 使用默认值
   }
 })
+
+let touchStartX = 0
+let touchStartY = 0
+let touchStartTime = 0
+
+function onTouchStart(e) {
+  touchStartX = e.touches[0].clientX
+  touchStartY = e.touches[0].clientY
+  touchStartTime = Date.now()
+}
+
+function onTouchEnd(e) {
+  const deltaX = e.changedTouches[0].clientX - touchStartX
+  const deltaY = e.changedTouches[0].clientY - touchStartY
+  const deltaTime = Date.now() - touchStartTime
+  if (deltaTime > 300 || Math.abs(deltaX) < 50) return
+  if (Math.abs(deltaX) > Math.abs(deltaY)) {
+    if (deltaX < 0) goNext()
+    else goPrev()
+  }
+}
+
+function goPrev() {
+  if (currentIndex.value <= 0) return
+  navigateToIndex(currentIndex.value - 1)
+}
+
+function goNext() {
+  if (currentIndex.value >= store.photos.length - 1) return
+  navigateToIndex(currentIndex.value + 1)
+}
+
+function navigateToIndex(index) {
+  const item = store.photos[index]
+  if (!item) return
+  if (item.type === 'video') {
+    uni.redirectTo({ url: `/pages/video/video?index=${index}` })
+  } else {
+    const photoIndex = store.photos.filter(p => p.type === 'photo').findIndex(p => p.name === item.name)
+    if (photoIndex >= 0) {
+      uni.redirectTo({ url: `/pages/viewer/viewer?index=${photoIndex}` })
+    }
+  }
+}
 
 function goBack() {
   uni.navigateBack({ delta: 1 })
@@ -148,10 +216,22 @@ async function saveVideo() {
   width: 110rpx;
 }
 
-.video-player {
-  width: 100vw;
+.video-stage {
   flex: 1;
+  width: 100%;
   min-height: 60vh;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: black;
+}
+
+.video-player {
+  width: 100%;
+  height: 100%;
+  min-height: 60vh;
+  display: block;
 }
 
 .video-error {
@@ -167,6 +247,31 @@ async function saveVideo() {
   border-radius: 16rpx;
 }
 
+.nav-overlay {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 120rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+
+.nav-prev {
+  left: 0;
+}
+
+.nav-next {
+  right: 0;
+}
+
+.nav-arrow {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 64rpx;
+  font-weight: 300;
+}
+
 .video-info {
   width: 100%;
   padding: 40rpx;
@@ -174,14 +279,20 @@ async function saveVideo() {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 24rpx;
+  gap: 16rpx;
   box-sizing: border-box;
 }
 
 .video-name {
   color: white;
-  font-size: 28rpx;
+  font-size: 26rpx;
   text-align: center;
+  opacity: 0.9;
+}
+
+.video-meta {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 24rpx;
 }
 
 .save-btn {

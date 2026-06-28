@@ -107,12 +107,8 @@ async function screenshot(miniProgram, name) {
 
       for (let i = 0; i < mediaIndices.videos.length; i++) {
         const v = mediaIndices.videos[i]
-        const lowerName = v.name.toLowerCase()
-        const videoUrl = lowerName.endsWith('.livp')
-          ? `${MEDIA_HOST}/livp/${encodeURIComponent(v.name)}`
-          : `${MEDIA_HOST}/video/${encodeURIComponent(v.name)}`
-        await miniProgram.navigateTo(`/pages/video/video?url=${encodeURIComponent(videoUrl)}&name=${encodeURIComponent(v.name)}`)
-        await sleep(2500)
+        await miniProgram.navigateTo(`/pages/video/video?index=${v.originalIndex}`)
+        await sleep(3000)
         await screenshot(miniProgram, `viewer_video_${i}`)
         await miniProgram.navigateBack({ delta: 1 })
         await sleep(800)
@@ -159,11 +155,6 @@ async function screenshot(miniProgram, name) {
     await miniProgram.navigateTo('/pages/milestones/manage')
     await sleep(2500)
     await screenshot(miniProgram, 'milestones_manage')
-
-    // 8. 视频播放页
-    await miniProgram.reLaunch('/pages/video/video?url=https%3A%2F%2Fqqing.top%2Fapi%2Fplaceholder.mp4&name=test.mp4')
-    await sleep(2000)
-    await screenshot(miniProgram, 'video')
 
     await miniProgram.close()
     console.log('All screenshots done.')
