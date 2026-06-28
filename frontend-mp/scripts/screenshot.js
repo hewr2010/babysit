@@ -74,13 +74,34 @@ async function screenshot(miniProgram, name) {
         await screenshot(miniProgram, 'photos_expanded')
       }
 
-      // 3.6 点击照片触发 uni.previewMedia，验证调用成功
-      const firstPhoto = await indexPage.$('.photo-item')
-      if (firstPhoto) {
-        await firstPhoto.tap()
-        await sleep(2500)
-        // 原生预览层会遮住页面，自动化无法关闭，直接截图当前状态
-        await screenshot(miniProgram, 'preview_media')
+      // 3.6 打开预览页并定位到第一张真正的照片（跳过前 19 个视频）
+      const photoIndex = await miniProgram.evaluate(() => {
+        const app = getApp()
+        const store = app?.$vm?.$pinia?.state?.value?.app
+        if (!store) return -1
+        return store.photos.findIndex(p => p.type === 'photo')
+      })
+      if (photoIndex >= 0) {
+        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${photoIndex}`)
+        await sleep(3000)
+        await screenshot(miniProgram, 'viewer_photo')
+        await miniProgram.navigateBack({ delta: 1 })
+        await sleep(1500)
+      }
+
+      // 3.7 打开预览页并定位到第一个视频
+      const videoIndex = await miniProgram.evaluate(() => {
+        const app = getApp()
+        const store = app?.$vm?.$pinia?.state?.value?.app
+        if (!store) return -1
+        return store.photos.findIndex(p => p.type === 'video')
+      })
+      if (videoIndex >= 0) {
+        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${videoIndex}`)
+        await sleep(3000)
+        await screenshot(miniProgram, 'viewer_video')
+        await miniProgram.navigateBack({ delta: 1 })
+        await sleep(1500)
       }
 
     }

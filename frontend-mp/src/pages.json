@@ -28,6 +28,13 @@
         "navigationBarTitleText": "视频播放",
         "navigationStyle": "custom"
       }
+    },
+    {
+      "path": "pages/viewer/viewer",
+      "style": {
+        "navigationBarTitleText": "预览",
+        "navigationStyle": "custom"
+      }
     }
   ],
   "globalStyle": {
