@@ -83,7 +83,7 @@ async function screenshot(miniProgram, name) {
           .map((p, i) => ({ ...p, originalIndex: i }))
           .filter(p => p.type === 'photo')
           .slice(0, 3)
-          .map((p, i) => ({ originalIndex: p.originalIndex, photoIndex: i, name: p.name }))
+          .map(p => ({ originalIndex: p.originalIndex, name: p.name }))
         const videos = store.photos
           .map((p, i) => ({ ...p, originalIndex: i }))
           .filter(p => p.type === 'video')
@@ -98,7 +98,7 @@ async function screenshot(miniProgram, name) {
 
       for (let i = 0; i < mediaIndices.photos.length; i++) {
         const p = mediaIndices.photos[i]
-        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${p.photoIndex}`)
+        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${p.originalIndex}`)
         await sleep(2500)
         await screenshot(miniProgram, `viewer_photo_${i}`)
         await miniProgram.navigateBack({ delta: 1 })
@@ -107,7 +107,7 @@ async function screenshot(miniProgram, name) {
 
       for (let i = 0; i < mediaIndices.videos.length; i++) {
         const v = mediaIndices.videos[i]
-        await miniProgram.navigateTo(`/pages/video/video?index=${v.originalIndex}`)
+        await miniProgram.navigateTo(`/pages/viewer/viewer?index=${v.originalIndex}`)
         await sleep(3000)
         await screenshot(miniProgram, `viewer_video_${i}`)
         await miniProgram.navigateBack({ delta: 1 })

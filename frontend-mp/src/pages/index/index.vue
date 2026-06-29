@@ -88,19 +88,8 @@ function showRecordOptions() {
 }
 
 function openPhotoViewer(index) {
-  if (!store.photos.length) return
-  const item = store.photos[index]
-  if (!item) return
-
-  if (item.type === 'video') {
-    uni.navigateTo({ url: `/pages/video/video?index=${index}` })
-    return
-  }
-
-  const photoIndex = store.photos.filter(p => p.type === 'photo').findIndex(p => p.name === item.name)
-  if (photoIndex >= 0) {
-    uni.navigateTo({ url: `/pages/viewer/viewer?index=${photoIndex}` })
-  }
+  if (!store.photos.length || index < 0 || index >= store.photos.length) return
+  uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
 }
 </script>
 
