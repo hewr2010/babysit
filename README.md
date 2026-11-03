@@ -96,6 +96,49 @@ python -m babysit.photo_sync daemon
 
 默认每 30 分钟处理最多 50 张新照片，相似度不低于 0.55 自动复制，0.35 到 0.55 进入人工确认。可分别通过 `PHOTO_SYNC_INTERVAL`、`PHOTO_SYNC_SCAN_LIMIT`、`PHOTO_SYNC_AUTO_THRESHOLD`、`PHOTO_SYNC_REVIEW_THRESHOLD` 调整。其他配置见 `babysit/photo_sync_config.py`。
 
+#### 使用 tmux 长期运行
+
+在本机执行以下命令，后台持续识别 `/来自：iPhone` 并复制到 `/apps/bypy/爸妈与小宝`：
+
+```bash
+mkdir -p /Users/hwr/storage/babysit/babysit/data/photo_sync
+
+tmux new-session -d -s babysit-photo-sync \
+  "cd /Users/hwr/storage/babysit && \
+   PHOTO_SYNC_SOURCE_PATH='/来自：iPhone' \
+   BAIDUPCS_GO_CONFIG_DIR='/Users/hwr/storage/babysit/babysit/data/photo_sync/baidupcs-config' \
+   PYTHONUNBUFFERED=1 \
+   .venv/bin/python -m babysit.photo_sync daemon \
+   >> babysit/data/photo_sync/daemon.log 2>&1"
+```
+
+复制后的媒体还需要现有刷新进程生成缩略图、提取视频并入库，建议同时运行：
+
+```bash
+tmux new-session -d -s babysit-media-refresh \
+  "cd /Users/hwr/storage/babysit && \
+   PYTHONUNBUFFERED=1 \
+   .venv/bin/python -m babysit.refresh_media \
+   >> babysit/data/photo_sync/refresh-media.log 2>&1"
+```
+
+常用管理命令：
+
+```bash
+# 查看两个进程
+tmux ls
+
+# 查看同步日志
+tail -f /Users/hwr/storage/babysit/babysit/data/photo_sync/daemon.log
+
+# 接入照片同步会话；按 Ctrl-b 再按 d 离开且不停止进程
+tmux attach -t babysit-photo-sync
+
+# 停止进程
+tmux kill-session -t babysit-photo-sync
+tmux kill-session -t babysit-media-refresh
+```
+
 访问 http://localhost:8080
 
 ## 数据存储
