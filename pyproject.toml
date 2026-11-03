@@ -19,6 +19,12 @@ dependencies = [
     "gunicorn>=21.0.0",
 ]
 
+[project.optional-dependencies]
+photo-sync = [
+    "insightface>=0.7.3",
+    "numpy>=1.24",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["babysit"]
 

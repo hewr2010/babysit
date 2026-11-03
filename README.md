@@ -49,6 +49,53 @@ python -m babysit.refresh_media
 
 该进程每 3 分钟从百度网盘获取多媒体文件列表，并进行预处理（生成缩略图、预览图、提取视频等），只有完全完成预处理的文件才会在数据库中标记为可用。
 
+### 3. 手机照片自动筛选（可选）
+
+安装人脸识别依赖：
+
+```bash
+uv pip install -e '.[photo-sync]'
+```
+
+另外安装 [BaiduPCS-Go](https://github.com/qjfoidnh/BaiduPCS-Go)，按其 README 完成登录。项目会优先使用 `babysit/data/photo_sync/bin/BaiduPCS-Go`（若存在），否则从 PATH 查找。官方接口负责读取手机目录和缩略图，BaiduPCS-Go 负责把筛选出的原图复制到应用目录。登录凭证不要写入项目或提交到 Git。
+
+登录时让凭证与同步进程使用同一个项目内配置目录：
+
+```bash
+export BAIDUPCS_GO_CONFIG_DIR="$PWD/babysit/data/photo_sync/baidupcs-config"
+```
+
+配置手机备份目录，并在本地参考目录放入女儿不同年龄、角度的清晰照片：
+
+```bash
+export PHOTO_SYNC_SOURCE_PATH="/来自：iPhone"
+export PHOTO_SYNC_REFERENCE_DIR="$PWD/babysit/data/photo_sync/references"
+```
+
+先检查链路，再进行不复制文件的识别：
+
+```bash
+python -m babysit.photo_sync doctor
+python -m babysit.photo_sync sync --dry-run --limit 20
+python -m babysit.photo_sync status --status review
+```
+
+确认识别结果后，复制或跳过待确认项目：
+
+```bash
+python -m babysit.photo_sync approve <fs_id>
+python -m babysit.photo_sync reject <fs_id>
+```
+
+正式执行一轮或持续运行：
+
+```bash
+python -m babysit.photo_sync sync
+python -m babysit.photo_sync daemon
+```
+
+默认每 30 分钟处理最多 50 张新照片，相似度不低于 0.55 自动复制，0.35 到 0.55 进入人工确认。可分别通过 `PHOTO_SYNC_INTERVAL`、`PHOTO_SYNC_SCAN_LIMIT`、`PHOTO_SYNC_AUTO_THRESHOLD`、`PHOTO_SYNC_REVIEW_THRESHOLD` 调整。其他配置见 `babysit/photo_sync_config.py`。
+
 访问 http://localhost:8080
 
 ## 数据存储

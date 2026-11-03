@@ -27,6 +27,7 @@
 - **SQLite** - 数据库 (WAL 模式)
 - **Pillow** - 图片处理
 - **bypy** - 百度网盘 API 交互
+- **InsightFace**（可选）- 本地人脸检测与特征比对
 
 ### 前端 (frontend/src/)
 - **Vue 3** - 框架
@@ -45,6 +46,11 @@ babysit/
 ├── baidu.py        # 百度网盘交互
 ├── config.py       # 配置
 ├── refresh_media.py # 后台媒体刷新进程
+├── photo_sync.py   # 手机照片自动筛选 CLI 与同步流程
+├── photo_sync_config.py # 照片同步环境配置
+├── photo_sync_db.py # 照片同步状态与去重
+├── face_matcher.py # 本地人脸识别
+├── baidu_sync.py   # 百度图片列表与网盘内复制
 └── utils.py        # 工具函数
 
 frontend/src/
@@ -80,6 +86,11 @@ frontend/src/
 
 **milestones** - 重要时刻
 - id, media_filename, title, description
+
+**photo_sync_items** - 手机照片同步状态（可选照片筛选进程）
+- fs_id, source_path, filename, md5, size, server_mtime
+- thumbnail_path, face_score, face_count, status, target_path
+- error, retry_count, created_at, updated_at
 
 ### 文件缓存
 - `babysit/data/cache/thumbs/` - 200x200 缩略图
@@ -125,6 +136,13 @@ frontend/src/
 2. 生成缩略图和预览图
 3. 提取 .livp 视频
 4. 更新数据库
+
+`photo_sync.py`（可选）- 独立照片筛选进程：
+1. 通过官方图片列表接口增量读取手机备份目录
+2. 下载缩略图并在本地用 InsightFace 识别女儿
+3. 高分照片通过 BaiduPCS-Go 复制到 `/apps/bypy/爸妈与小宝`
+4. 灰区照片通过 CLI 人工确认，SQLite 记录去重与恢复状态
+5. 使用 `python -m babysit.photo_sync daemon` 运行，配置见 README
 
 ## API 端点
 
