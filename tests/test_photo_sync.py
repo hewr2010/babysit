@@ -22,12 +22,16 @@ def photo(fs_id, name=None, md5=None):
 
 
 class FakeImageClient:
-    def __init__(self, pages):
+    def __init__(self, pages, target_files=()):
         self.pages = pages
+        self.target_files = list(target_files)
         self.page_size = 100
 
     def iter_pages(self):
         yield from self.pages
+
+    def list_files(self, remote_path):
+        return self.target_files
 
     def download_thumbnail(self, item, destination):
         destination = Path(destination)
@@ -89,13 +93,13 @@ class PhotoSyncTestCase(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    def service(self, pages, scores, copier=None):
+    def service(self, pages, scores, copier=None, target_files=()):
         store = PhotoSyncStore(self.config.db_path)
         matcher = FakeMatcher(scores)
         service = PhotoSyncService(
             self.config,
             store=store,
-            image_client=FakeImageClient(pages),
+            image_client=FakeImageClient(pages, target_files),
             copier=copier or FakeCopier(),
             matcher=matcher,
         )
@@ -130,15 +134,57 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(store.get(3)["status"], "rejected")
         self.assertEqual(store.get(4)["status"], "review")
 
-    def test_existing_filename_uses_stable_fs_id_suffix(self):
-        original = "/apps/bypy/爸妈与小宝/IMG_1.jpg"
-        copier = FakeCopier(existing={original})
-        service, store, _, _ = self.service([[photo(1)]], {"1": 0.8}, copier)
+    def test_target_filename_is_processed_without_face_analysis(self):
+        target = "/apps/bypy/爸妈与小宝/IMG_1.jpg"
+        target_files = [{"server_filename": "IMG_1.jpg", "path": target, "md5": "other"}]
+        service, store, copier, matcher = self.service(
+            [[photo(1)]], {"1": 0.8}, target_files=target_files
+        )
 
-        service.sync()
-        expected = "/apps/bypy/爸妈与小宝/IMG_1_1.jpg"
-        self.assertEqual(store.get(1)["target_path"], expected)
-        self.assertEqual(copier.copies[0][1], expected)
+        self.assertEqual(service.sync()["existing"], 1)
+        self.assertEqual(store.get(1)["status"], "copied")
+        self.assertEqual(store.get(1)["target_path"], target)
+        self.assertEqual(matcher.calls, 0)
+        self.assertEqual(copier.copies, [])
+
+    def test_target_fs_id_suffix_is_processed(self):
+        target = "/apps/bypy/爸妈与小宝/IMG_1_1.jpg"
+        target_files = [{"server_filename": "IMG_1_1.jpg", "path": target}]
+        service, store, copier, matcher = self.service(
+            [[photo(1)]], {"1": 0.8}, target_files=target_files
+        )
+
+        self.assertEqual(service.sync()["existing"], 1)
+        self.assertEqual(store.get(1)["target_path"], target)
+        self.assertEqual(matcher.calls, 0)
+        self.assertEqual(copier.copies, [])
+
+    def test_target_md5_is_processed_even_when_renamed(self):
+        target = "/apps/bypy/爸妈与小宝/renamed.jpg"
+        target_files = [
+            {"server_filename": "renamed.jpg", "path": target, "md5": "md5-1"}
+        ]
+        service, store, copier, matcher = self.service(
+            [[photo(1)]], {"1": 0.8}, target_files=target_files
+        )
+
+        self.assertEqual(service.sync()["existing"], 1)
+        self.assertEqual(store.get(1)["target_path"], target)
+        self.assertEqual(matcher.calls, 0)
+        self.assertEqual(copier.copies, [])
+
+    def test_duplicate_source_is_only_copied_once_per_run(self):
+        first = photo(1, name="first.jpg", md5="same")
+        second = photo(2, name="second.jpg", md5="same")
+        service, _, copier, matcher = self.service(
+            [[first, second]], {"1": 0.8, "2": 0.8}
+        )
+
+        results = service.sync()
+        self.assertEqual(results["copied"], 1)
+        self.assertEqual(results["existing"], 1)
+        self.assertEqual(matcher.calls, 1)
+        self.assertEqual(len(copier.copies), 1)
 
     def test_copy_failure_resumes_without_recognition_or_rename(self):
         copier = FakeCopier(fail_times=1)

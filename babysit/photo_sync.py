@@ -100,14 +100,37 @@ class PhotoSyncService:
         except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
             return self._record_error(fs_id, exc)
 
+    @staticmethod
+    def _existing_target(photo, target_names, target_md5s):
+        filename = photo["server_filename"]
+        if filename in target_names:
+            return target_names[filename]
+        path = Path(filename)
+        suffixed_name = f"{path.stem}_{photo['fs_id']}{path.suffix}"
+        if suffixed_name in target_names:
+            return target_names[suffixed_name]
+        md5 = photo.get("md5")
+        return target_md5s.get(md5) if md5 else None
+
     def sync(self, limit=None, dry_run=False):
         self.config.validate()
         limit = limit or self.config.scan_limit
         if limit < 1:
             raise ValueError("limit 必须大于 0")
-        _ = self.matcher
+        target_files = self.image_client.list_files(self.config.destination_path)
+        target_names = {
+            item["server_filename"]: item["path"]
+            for item in target_files
+            if item.get("server_filename") and item.get("path")
+        }
+        target_md5s = {
+            item["md5"]: item["path"]
+            for item in target_files
+            if item.get("md5") and item.get("path")
+        }
         results = {
             "copied": 0,
+            "existing": 0,
             "review": 0,
             "rejected": 0,
             "error": 0,
@@ -119,6 +142,13 @@ class PhotoSyncService:
         for page in self.image_client.iter_pages():
             for photo in page:
                 fs_id = str(photo["fs_id"])
+                target_path = self._existing_target(photo, target_names, target_md5s)
+                if target_path:
+                    item = self.store.upsert(photo)
+                    if item["status"] != "copied":
+                        self.store.set_copied(fs_id, target_path)
+                    results["existing"] += 1
+                    continue
                 existing = self.store.get(fs_id)
                 if existing and existing["status"] in HANDLED_STATUSES:
                     results["skipped"] += 1
@@ -129,6 +159,12 @@ class PhotoSyncService:
                 outcome = self.process_photo(photo, dry_run=dry_run)
                 results[outcome] += 1
                 processed += 1
+                if outcome == "copied":
+                    item = self.store.get(fs_id)
+                    target_name = item["target_path"].rsplit("/", 1)[-1]
+                    target_names[target_name] = item["target_path"]
+                    if photo.get("md5"):
+                        target_md5s[photo["md5"]] = item["target_path"]
             if limit_hit:
                 break
             if page and all(
@@ -184,8 +220,8 @@ def _config_from_args(args, require_source=True):
 
 def _print_results(results):
     print(
-        "本轮：复制 {copied}，待确认 {review}，跳过不匹配 {rejected}，"
-        "失败 {error}，已处理 {skipped}".format(**results)
+        "本轮：复制 {copied}，目标已有 {existing}，待确认 {review}，"
+        "跳过不匹配 {rejected}，失败 {error}，已处理 {skipped}".format(**results)
     )
 
 

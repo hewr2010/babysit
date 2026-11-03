@@ -51,6 +51,30 @@ class BaiduImageClientTests(unittest.TestCase):
             self.assertRaisesRegex(BaiduAPIError, "denied"):
             client.list_page(1)
 
+    def test_list_files_reads_target_and_filters_directories(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "errno": 0,
+                        "list": [
+                            {"server_filename": "folder", "isdir": 1},
+                            {"server_filename": "a.jpg", "isdir": 0},
+                        ],
+                    }
+                )
+            ]
+        )
+        client = BaiduImageClient("/来自：手机", session=session)
+        with patch.dict("os.environ", {"BABYSIT_BAIDU_ACCESS_TOKEN": "token"}):
+            items = client.list_files("/apps/bypy/爸妈与小宝")
+
+        self.assertEqual(items, [{"server_filename": "a.jpg", "isdir": 0}])
+        params = session.calls[0][1]["params"]
+        self.assertEqual(params["method"], "list")
+        self.assertEqual(params["dir"], "/apps/bypy/爸妈与小宝")
+        self.assertEqual(params["limit"], 1000)
+
     def test_thumbnail_download_prefers_largest_url(self):
         session = FakeSession([FakeResponse(content=b"image")])
         client = BaiduImageClient("/来自：手机", session=session)

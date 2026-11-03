@@ -59,6 +59,39 @@ class BaiduImageClient:
             )
         return data.get("info", [])
 
+    def list_files(self, remote_path):
+        token = self._access_token()
+        if not token:
+            raise BaiduAPIError("未找到百度 access token，请先完成 bypy 授权")
+        files = []
+        start = 0
+        limit = 1000
+        while True:
+            response = self.session.get(
+                self.endpoint,
+                params={
+                    "method": "list",
+                    "access_token": token,
+                    "dir": remote_path,
+                    "start": start,
+                    "limit": limit,
+                },
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
+            if data.get("errno") != 0:
+                raise BaiduAPIError(
+                    f"目标目录读取失败 errno={data.get('errno')}: "
+                    f"{data.get('errmsg') or data.get('show_msg') or data.get('newno') or ''}"
+                )
+            batch = data.get("list", [])
+            files.extend(item for item in batch if not item.get("isdir"))
+            if len(batch) < limit:
+                break
+            start += len(batch)
+        return files
+
     def iter_pages(self):
         page = 1
         while True:

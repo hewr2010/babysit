@@ -96,6 +96,8 @@ python -m babysit.photo_sync daemon
 
 默认每 30 分钟处理最多 50 张新照片，相似度不低于 0.55 自动复制，0.35 到 0.55 进入人工确认。可分别通过 `PHOTO_SYNC_INTERVAL`、`PHOTO_SYNC_SCAN_LIMIT`、`PHOTO_SYNC_AUTO_THRESHOLD`、`PHOTO_SYNC_REVIEW_THRESHOLD` 调整。其他配置见 `babysit/photo_sync_config.py`。
 
+每轮会先读取目标目录进行对账：同名文件、带对应 `fs_id` 后缀的文件或 MD5 相同的文件都视为已经处理，不再运行人脸识别，也不占用每轮分析额度。因此本地 SQLite 不是完整的处理历史也没关系，不需要读取其他环境的生产数据库。积压照片通过 `scan_backlog` 分批续跑，目标目录无法读取时会停止本轮以避免重复复制。
+
 #### 使用 tmux 长期运行
 
 在本机执行以下命令，后台持续识别 `/来自：iPhone` 并复制到 `/apps/bypy/爸妈与小宝`：
