@@ -140,10 +140,11 @@ frontend/src/
 `photo_sync.py`（可选）- 独立照片筛选进程：
 1. 通过官方图片列表接口增量读取手机备份目录
 2. 每轮先对账目标目录，同名、`fs_id` 后缀或 MD5 相同即视为已处理
-3. 下载缩略图并在本地用 InsightFace 识别女儿
-4. 高分照片通过 BaiduPCS-Go 复制到 `/apps/bypy/爸妈与小宝`
+3. 并发预取缩略图，在本地用 InsightFace 逐张识别女儿
+4. 高分照片通过 BaiduPCS-Go 串行复制到 `/apps/bypy/爸妈与小宝`
 5. 灰区照片通过 CLI 人工确认，SQLite 记录去重与恢复状态
-6. 使用 `python -m babysit.photo_sync daemon` 运行，配置见 README
+6. backlog 每 60 秒续跑，追平后恢复常规间隔，配置见 README
+7. 使用 `python -m babysit.photo_sync daemon` 运行
 
 ## API 端点
 

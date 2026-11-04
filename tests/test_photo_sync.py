@@ -39,6 +39,11 @@ class FakeImageClient:
         destination.write_bytes(str(item["fs_id"]).encode())
         return destination
 
+    def prefetch_thumbnails(self, photos, cache_dir, workers):
+        for item in photos:
+            self.download_thumbnail(item, Path(cache_dir) / f"{item['fs_id']}.jpg")
+        return {}
+
 
 class FakeMatcher:
     def __init__(self, scores):
@@ -85,6 +90,8 @@ class PhotoSyncTestCase(unittest.TestCase):
             scan_limit=50,
             page_size=100,
             interval=1800,
+            backlog_interval=60,
+            download_workers=4,
             max_retries=3,
             model_name="unused",
             model_dir=root / "models",
@@ -201,6 +208,17 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(matcher.calls, 1)
         self.assertEqual(len(copier.copies), 1)
 
+    def test_prefetch_failure_is_recorded_and_retried(self):
+        service, store, _, _ = self.service([[photo(1)]], {"1": 0.8})
+        service.image_client.prefetch_thumbnails = lambda *args: {
+            "1": RuntimeError("network timeout")
+        }
+
+        self.assertEqual(service.sync()["error"], 1)
+        self.assertEqual(store.get(1)["status"], "error")
+        self.assertEqual(store.get(1)["retry_count"], 1)
+        self.assertEqual(store.get(1)["source_path"], photo(1)["path"])
+
     def test_backlog_is_processed_on_later_runs(self):
         from dataclasses import replace
 
@@ -268,6 +286,8 @@ class PhotoSyncTestCase(unittest.TestCase):
             scan_limit=config.scan_limit,
             page_size=config.page_size,
             interval=config.interval,
+            backlog_interval=config.backlog_interval,
+            download_workers=config.download_workers,
             max_retries=config.max_retries,
             model_name=config.model_name,
             model_dir=config.model_dir,

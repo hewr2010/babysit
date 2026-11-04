@@ -78,7 +78,8 @@ class PhotoSyncService:
 
         thumbnail_path = self.config.cache_dir / f"{fs_id}.jpg"
         try:
-            self.image_client.download_thumbnail(photo, thumbnail_path)
+            if not thumbnail_path.exists():
+                self.image_client.download_thumbnail(photo, thumbnail_path)
             match = self.matcher.match(thumbnail_path.read_bytes())
             if match.score is None or match.score < self.config.review_threshold:
                 self.store.set_match(
@@ -140,6 +141,7 @@ class PhotoSyncService:
         limit_hit = False
         backlog = self.store.get_state("scan_backlog") == "1"
         for page in self.image_client.iter_pages():
+            candidates = []
             for photo in page:
                 fs_id = str(photo["fs_id"])
                 target_path = self._existing_target(photo, target_names, target_md5s)
@@ -153,18 +155,45 @@ class PhotoSyncService:
                 if existing and existing["status"] in HANDLED_STATUSES:
                     results["skipped"] += 1
                     continue
-                if processed >= limit:
+                if processed + len(candidates) >= limit:
                     limit_hit = True
                     break
-                outcome = self.process_photo(photo, dry_run=dry_run)
+                candidates.append(photo)
+            prefetch = []
+            for photo in candidates:
+                item = self.store.get(str(photo["fs_id"]))
+                thumbnail_path = self.config.cache_dir / f"{photo['fs_id']}.jpg"
+                if thumbnail_path.exists():
+                    continue
+                if item and item.get("target_path") and item.get("face_score") is not None:
+                    continue
+                if item and item["retry_count"] >= self.config.max_retries:
+                    continue
+                prefetch.append(photo)
+            prefetch_errors = self.image_client.prefetch_thumbnails(
+                prefetch, self.config.cache_dir, self.config.download_workers
+            )
+            for photo in candidates:
+                fs_id = str(photo["fs_id"])
+                target_path = self._existing_target(photo, target_names, target_md5s)
+                if target_path:
+                    self.store.upsert(photo)
+                    self.store.set_copied(fs_id, target_path)
+                    results["existing"] += 1
+                    continue
+                if fs_id in prefetch_errors:
+                    self.store.upsert(photo)
+                    outcome = self._record_error(fs_id, prefetch_errors[fs_id])
+                else:
+                    outcome = self.process_photo(photo, dry_run=dry_run)
                 results[outcome] += 1
-                processed += 1
                 if outcome == "copied":
                     item = self.store.get(fs_id)
                     target_name = item["target_path"].rsplit("/", 1)[-1]
                     target_names[target_name] = item["target_path"]
                     if photo.get("md5"):
                         target_md5s[photo["md5"]] = item["target_path"]
+            processed += len(candidates)
             if limit_hit:
                 break
             if page and all(
@@ -220,8 +249,10 @@ def _config_from_args(args, require_source=True):
 
 def _print_results(results):
     print(
+        time.strftime("%Y-%m-%d %H:%M:%S"),
         "本轮：复制 {copied}，目标已有 {existing}，待确认 {review}，"
-        "跳过不匹配 {rejected}，失败 {error}，已处理 {skipped}".format(**results)
+        "跳过不匹配 {rejected}，失败 {error}，已处理 {skipped}".format(**results),
+        flush=True,
     )
 
 
@@ -262,10 +293,14 @@ def main(argv=None):
         elif args.command == "daemon":
             while True:
                 try:
+                    print("开始本轮同步...", flush=True)
                     _print_results(service.sync())
                 except (RuntimeError, requests.RequestException) as exc:
-                    print(f"本轮同步失败：{exc}", file=sys.stderr)
-                time.sleep(config.interval)
+                    print(f"本轮同步失败：{exc}", file=sys.stderr, flush=True)
+                has_backlog = service.store.get_state("scan_backlog") == "1"
+                delay = config.backlog_interval if has_backlog else config.interval
+                print(f"下一轮将在 {delay} 秒后开始...", flush=True)
+                time.sleep(delay)
         elif args.command == "status":
             print("状态统计：", service.store.counts())
             for item in service.store.list_items(args.filter_status, args.limit):

@@ -18,6 +18,8 @@ class PhotoSyncConfig:
     scan_limit: int
     page_size: int
     interval: int
+    backlog_interval: int
+    download_workers: int
     max_retries: int
     model_name: str
     model_dir: Path
@@ -56,6 +58,8 @@ class PhotoSyncConfig:
             scan_limit=int(os.environ.get("PHOTO_SYNC_SCAN_LIMIT", "50")),
             page_size=int(os.environ.get("PHOTO_SYNC_PAGE_SIZE", "100")),
             interval=int(os.environ.get("PHOTO_SYNC_INTERVAL", "1800")),
+            backlog_interval=int(os.environ.get("PHOTO_SYNC_BACKLOG_INTERVAL", "60")),
+            download_workers=int(os.environ.get("PHOTO_SYNC_DOWNLOAD_WORKERS", "4")),
             max_retries=int(os.environ.get("PHOTO_SYNC_MAX_RETRIES", "10")),
             model_name=os.environ.get("PHOTO_SYNC_MODEL", "buffalo_l"),
             model_dir=Path(
@@ -78,5 +82,7 @@ class PhotoSyncConfig:
             raise ValueError("识别阈值需满足 -1 <= review < auto <= 1")
         if self.scan_limit < 1 or not 1 <= self.page_size <= 1000:
             raise ValueError("scan_limit 必须大于 0，page_size 必须在 1 到 1000 之间")
-        if self.interval < 1 or self.max_retries < 1:
-            raise ValueError("interval 和 max_retries 必须大于 0")
+        if self.interval < 1 or self.backlog_interval < 1 or self.max_retries < 1:
+            raise ValueError("interval、backlog_interval 和 max_retries 必须大于 0")
+        if not 1 <= self.download_workers <= 16:
+            raise ValueError("download_workers 必须在 1 到 16 之间")

@@ -117,6 +117,29 @@ class BaiduImageClient:
         temporary.replace(destination)
         return destination
 
+    def prefetch_thumbnails(self, photos, cache_dir, workers):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        local = threading.local()
+
+        def fetch(photo):
+            fs_id = str(photo["fs_id"])
+            try:
+                if not hasattr(local, "client"):
+                    local.client = BaiduImageClient(
+                        self.source_path, self.page_size, self.timeout
+                    )
+                destination = Path(cache_dir) / f"{fs_id}.jpg"
+                local.client.download_thumbnail(photo, destination)
+                return fs_id, None
+            except (OSError, RuntimeError, requests.RequestException) as exc:
+                return fs_id, exc
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = pool.map(fetch, photos)
+        return {fs_id: error for fs_id, error in results if error is not None}
+
 
 class BaiduPCSClient:
     def __init__(self, executable="BaiduPCS-Go", timeout=120, config_dir=None):
