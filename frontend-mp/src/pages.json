@@ -1,0 +1,39 @@
+{
+  "pages": [
+    {
+      "path": "pages/auth/auth",
+      "style": {
+        "navigationBarTitleText": "宝宝成长日志",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "宝宝成长日志",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/viewer/viewer",
+      "style": {
+        "navigationBarTitleText": "媒体预览",
+        "navigationStyle": "custom"
+      }
+    },
+    {
+      "path": "pages/milestones/manage",
+      "style": {
+        "navigationBarTitleText": "重要时刻管理",
+        "navigationBarBackgroundColor": "#fce7f3",
+        "navigationBarTextStyle": "black"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "宝宝成长日志",
+    "navigationBarBackgroundColor": "#fce7f3",
+    "backgroundColor": "#fdf2f8"
+  }
+}
