@@ -147,31 +147,20 @@ tmux kill-window -t babysit:refresh
 
 #### 查看最近同步内容
 
-```bash
-# 最近 24 小时的统计和最近 20 条女儿候选记录
-python -m babysit.photo_sync recent
+不需要单独运行观察进程。同步进程会在每张文件实际复制并校验成功后，立即记录来源、目标和人脸相似度，并在每轮结束时记录汇总：
 
-# 自定义时间范围和条数
-python -m babysit.photo_sync recent --hours 72 --limit 50
-
-# 包含不匹配记录
-python -m babysit.photo_sync recent --all
-
-# 每 10 秒自动刷新，按 Ctrl-c 退出
-python -m babysit.photo_sync recent --watch 10
+```text
+2026-11-08 22:30:00 已复制：/来自：iPhone/IMG_0001.jpg -> /apps/bypy/爸妈与小宝/IMG_0001.jpg，相似度 0.812
+2026-11-08 22:30:05 本轮：复制 1，目标已有 20，待确认 0，跳过不匹配 29，失败 0，已处理 100
 ```
 
-也可以在同一个 `babysit` session 中持续观察：
+直接查看同一个进程的日志：
 
 ```bash
-tmux new-window -t babysit -n recent \
-  "cd /Users/hwr/storage/babysit && \
-   PYTHONUNBUFFERED=1 \
-   .venv/bin/python -m babysit.photo_sync recent --watch 10"
-
-tmux attach -t babysit
-# Ctrl-b 然后按 d 离开；tmux kill-window -t babysit:recent 可停止观察
+tail -f /Users/hwr/storage/babysit/babysit/data/photo_sync/daemon.log
 ```
+
+目标目录已有而跳过的文件不逐条打印，避免日志过多。也可以随时手动运行 `python -m babysit.photo_sync recent --hours 24 --limit 20` 查询最近记录，无需常驻另一个观察进程。
 
 访问 http://localhost:8080
 

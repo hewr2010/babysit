@@ -145,7 +145,7 @@ frontend/src/
 5. 灰区照片通过 CLI 人工确认，SQLite 记录去重与恢复状态
 6. backlog 每 60 秒续跑，追平后恢复常规间隔，配置见 README
 7. 使用 `python -m babysit.photo_sync daemon` 运行
-8. 使用 `python -m babysit.photo_sync recent --watch 10` 查看最近统计和候选文件
+8. `daemon.log` 记录每张实际复制文件和每轮汇总，无需单独运行观察进程
 
 ## API 端点
 

@@ -50,6 +50,16 @@ class PhotoSyncService:
         self.store.set_copying(item["fs_id"], target_path)
         self.copier.copy(item["source_path"], target_path)
         self.store.set_copied(item["fs_id"], target_path)
+        score = (
+            f"，相似度 {item['face_score']:.3f}"
+            if item.get("face_score") is not None
+            else ""
+        )
+        print(
+            f"{time.strftime('%Y-%m-%d %H:%M:%S')} "
+            f"已复制：{item['source_path']} -> {target_path}{score}",
+            flush=True,
+        )
         return target_path
 
     def _record_error(self, fs_id, exc):

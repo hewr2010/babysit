@@ -114,9 +114,18 @@ class PhotoSyncTestCase(unittest.TestCase):
         return service, store, service.copier, matcher
 
     def test_high_score_is_copied_and_not_processed_again(self):
+        import io
+        from contextlib import redirect_stdout
+
         service, store, copier, matcher = self.service([[photo(1)]], {"1": 0.7})
 
-        self.assertEqual(service.sync()["copied"], 1)
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(service.sync()["copied"], 1)
+        self.assertIn("已复制", output.getvalue())
+        self.assertIn(photo(1)["path"], output.getvalue())
+        self.assertIn("/apps/bypy/爸妈与小宝/IMG_1.jpg", output.getvalue())
+        self.assertIn("0.700", output.getvalue())
         self.assertEqual(
             copier.copies,
             [(photo(1)["path"], "/apps/bypy/爸妈与小宝/IMG_1.jpg")],
