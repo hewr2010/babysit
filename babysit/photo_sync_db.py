@@ -188,6 +188,30 @@ class PhotoSyncStore:
         ).fetchall()
         return {row["status"]: row["count"] for row in rows}
 
+    def counts_since(self, cutoff):
+        rows = self.db.execute(
+            """
+            SELECT status, COUNT(*) AS count FROM photo_sync_items
+            WHERE updated_at >= ? GROUP BY status
+            """,
+            (cutoff,),
+        ).fetchall()
+        return {row["status"]: row["count"] for row in rows}
+
+    def list_recent(self, cutoff, limit=20, statuses=None):
+        query = """
+            SELECT * FROM photo_sync_items WHERE updated_at >= ?
+        """
+        params = [cutoff]
+        if statuses:
+            placeholders = ",".join("?" for _ in statuses)
+            query += f" AND status IN ({placeholders})"
+            params.extend(statuses)
+        query += " ORDER BY updated_at DESC, fs_id DESC LIMIT ?"
+        params.append(limit)
+        rows = self.db.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def get_state(self, key):
         row = self.db.execute(
             "SELECT value FROM photo_sync_state WHERE key = ?", (key,)

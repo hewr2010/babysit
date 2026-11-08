@@ -2,6 +2,7 @@ import argparse
 import sys
 import time
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -256,6 +257,52 @@ def _print_results(results):
     )
 
 
+def _print_recent(store, hours, limit, show_all=False):
+    if hours < 1 or limit < 1:
+        raise ValueError("hours 和 limit 必须大于 0")
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    counts = store.counts_since(cutoff)
+    copied = counts.get("copied", 0)
+    review = counts.get("review", 0)
+    rejected = counts.get("rejected", 0)
+    error = counts.get("error", 0)
+    print(
+        f"最近 {hours} 小时：找到女儿候选 {copied + review} 个"
+        f"（已复制/已有 {copied}，待确认 {review}），"
+        f"不匹配 {rejected}，失败 {error}",
+        flush=True,
+    )
+    statuses = None if show_all else ("copied", "review")
+    items = store.list_recent(cutoff, limit, statuses)
+    print(f"最近 {len(items)} 条（按处理时间）：", flush=True)
+    labels = {
+        "copied": "已复制/已有",
+        "review": "待确认",
+        "rejected": "不匹配",
+        "error": "失败",
+        "pending": "待处理",
+        "copying": "复制中",
+        "matched": "待复制",
+    }
+    for item in items:
+        updated = datetime.strptime(
+            item["updated_at"], "%Y-%m-%d %H:%M:%S"
+        ).replace(tzinfo=timezone.utc)
+        timestamp = updated.astimezone().strftime("%m-%d %H:%M:%S")
+        score = f"{item['face_score']:.3f}" if item["face_score"] is not None else "—"
+        media_type = (
+            "视频"
+            if item["filename"].lower().endswith((".livp", ".mp4", ".mov"))
+            else "图片"
+        )
+        status = labels.get(item["status"], item["status"])
+        print(
+            f"{timestamp}  {media_type}  {status:<6}  {score:>6}  {item['filename']}",
+            flush=True,
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="自动筛选并复制手机网盘照片中的女儿照片")
     parser.add_argument("--source", help="手机照片网盘来源目录")
@@ -273,6 +320,12 @@ def main(argv=None):
     status_parser = subparsers.add_parser("status", help="查看同步状态")
     status_parser.add_argument("--status", dest="filter_status")
     status_parser.add_argument("--limit", type=int, default=100)
+
+    recent_parser = subparsers.add_parser("recent", help="查看最近同步统计和文件")
+    recent_parser.add_argument("--hours", type=int, default=24, help="统计最近多少小时")
+    recent_parser.add_argument("--limit", type=int, default=20, help="最多列出多少条")
+    recent_parser.add_argument("--all", action="store_true", help="包含不匹配记录")
+    recent_parser.add_argument("--watch", type=int, metavar="SECONDS", help="每隔多少秒刷新")
 
     approve_parser = subparsers.add_parser("approve", help="复制一条待确认照片")
     approve_parser.add_argument("fs_id")
@@ -310,6 +363,17 @@ def main(argv=None):
                     else "无人脸"
                 )
                 print(f"{item['fs_id']}\t{score}\t{item['source_path']}")
+        elif args.command == "recent":
+            try:
+                while True:
+                    if args.watch:
+                        print("\033[2J\033[H", end="", flush=True)
+                    _print_recent(service.store, args.hours, args.limit, args.all)
+                    if not args.watch:
+                        break
+                    time.sleep(args.watch)
+            except KeyboardInterrupt:
+                pass
         elif args.command == "approve":
             print("已复制到：", service.approve(args.fs_id))
         elif args.command == "reject":

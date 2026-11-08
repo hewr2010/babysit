@@ -143,6 +143,34 @@ tmux kill-session -t babysit-photo-sync
 tmux kill-session -t babysit-media-refresh
 ```
 
+#### 查看最近同步内容
+
+```bash
+# 最近 24 小时的统计和最近 20 条女儿候选记录
+python -m babysit.photo_sync recent
+
+# 自定义时间范围和条数
+python -m babysit.photo_sync recent --hours 72 --limit 50
+
+# 包含不匹配记录
+python -m babysit.photo_sync recent --all
+
+# 每 10 秒自动刷新，按 Ctrl-c 退出
+python -m babysit.photo_sync recent --watch 10
+```
+
+也可以在独立 tmux 中持续观察：
+
+```bash
+tmux new-session -d -s babysit-photo-recent \
+  "cd /Users/hwr/storage/babysit && \
+   PYTHONUNBUFFERED=1 \
+   .venv/bin/python -m babysit.photo_sync recent --watch 10"
+
+tmux attach -t babysit-photo-recent
+# Ctrl-b 然后按 d 离开；tmux kill-session -t babysit-photo-recent 可停止观察
+```
+
 访问 http://localhost:8080
 
 ## 数据存储

@@ -295,6 +295,34 @@ class PhotoSyncTestCase(unittest.TestCase):
         with self.assertRaises(ValueError):
             config.validate()
 
+    def test_recent_counts_and_items_use_update_time_and_status_filter(self):
+        from datetime import datetime, timedelta, timezone
+
+        store = PhotoSyncStore(self.config.db_path)
+        self.addCleanup(store.close)
+        for fs_id in (1, 2, 3, 4):
+            store.upsert(photo(fs_id))
+        store.set_copied(1, "/apps/bypy/爸妈与小宝/IMG_1.jpg")
+        store.set_status(2, "review")
+        store.set_status(3, "rejected")
+        store.set_status(4, "copied")
+        now = datetime.now(timezone.utc)
+        recent = now.strftime("%Y-%m-%d %H:%M:%S")
+        older = (now + timedelta(seconds=1)).strftime("%Y-%m-%d %H:%M:%S")
+        old = (now - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+        store.db.execute("UPDATE photo_sync_items SET updated_at = ? WHERE fs_id = '1'", (recent,))
+        store.db.execute("UPDATE photo_sync_items SET updated_at = ? WHERE fs_id = '2'", (older,))
+        store.db.execute("UPDATE photo_sync_items SET updated_at = ? WHERE fs_id = '3'", (recent,))
+        store.db.execute("UPDATE photo_sync_items SET updated_at = ? WHERE fs_id = '4'", (old,))
+        cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+
+        self.assertEqual(
+            store.counts_since(cutoff), {"copied": 1, "review": 1, "rejected": 1}
+        )
+        items = store.list_recent(cutoff, 20, ("copied", "review"))
+        self.assertEqual([item["fs_id"] for item in items], ["2", "1"])
+        self.assertEqual(len(store.list_recent(cutoff, 20)), 3)
+
     def test_environment_thresholds(self):
         with patch.dict(
             "os.environ",
