@@ -107,7 +107,7 @@ python -m babysit.photo_sync daemon
 ```bash
 mkdir -p /Users/hwr/storage/babysit/babysit/data/photo_sync
 
-tmux new-session -d -s babysit-photo-sync \
+tmux new-session -d -s babysit -n sync \
   "cd /Users/hwr/storage/babysit && \
    PHOTO_SYNC_SOURCE_PATH='/来自：iPhone' \
    BAIDUPCS_GO_CONFIG_DIR='/Users/hwr/storage/babysit/babysit/data/photo_sync/baidupcs-config' \
@@ -116,10 +116,10 @@ tmux new-session -d -s babysit-photo-sync \
    >> babysit/data/photo_sync/daemon.log 2>&1"
 ```
 
-复制后的媒体还需要现有刷新进程生成缩略图、提取视频并入库，建议同时运行：
+所有任务只使用 `babysit` 这一个 session，其他任务以 window 形式加入。复制后的媒体还需要现有刷新进程生成缩略图、提取视频并入库，建议同时运行：
 
 ```bash
-tmux new-session -d -s babysit-media-refresh \
+tmux new-window -t babysit -n refresh \
   "cd /Users/hwr/storage/babysit && \
    PYTHONUNBUFFERED=1 \
    .venv/bin/python -m babysit.refresh_media \
@@ -129,18 +129,20 @@ tmux new-session -d -s babysit-media-refresh \
 常用管理命令：
 
 ```bash
-# 查看两个进程
+# 查看 session 和窗口
 tmux ls
+tmux list-windows -t babysit
 
 # 查看同步日志
 tail -f /Users/hwr/storage/babysit/babysit/data/photo_sync/daemon.log
 
-# 接入照片同步会话；按 Ctrl-b 再按 d 离开且不停止进程
-tmux attach -t babysit-photo-sync
+# 接入会话；Ctrl-b 再按 d 离开且不停止进程
+tmux attach -t babysit
+# Ctrl-b 再按 n / p 切换下一个 / 上一个 window
 
-# 停止进程
-tmux kill-session -t babysit-photo-sync
-tmux kill-session -t babysit-media-refresh
+# 只停止指定任务
+tmux kill-window -t babysit:sync
+tmux kill-window -t babysit:refresh
 ```
 
 #### 查看最近同步内容
@@ -159,16 +161,16 @@ python -m babysit.photo_sync recent --all
 python -m babysit.photo_sync recent --watch 10
 ```
 
-也可以在独立 tmux 中持续观察：
+也可以在同一个 `babysit` session 中持续观察：
 
 ```bash
-tmux new-session -d -s babysit-photo-recent \
+tmux new-window -t babysit -n recent \
   "cd /Users/hwr/storage/babysit && \
    PYTHONUNBUFFERED=1 \
    .venv/bin/python -m babysit.photo_sync recent --watch 10"
 
-tmux attach -t babysit-photo-recent
-# Ctrl-b 然后按 d 离开；tmux kill-session -t babysit-photo-recent 可停止观察
+tmux attach -t babysit
+# Ctrl-b 然后按 d 离开；tmux kill-window -t babysit:recent 可停止观察
 ```
 
 访问 http://localhost:8080
