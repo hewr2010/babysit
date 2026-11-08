@@ -1,3 +1,4 @@
+import datetime
 import functools
 import http.server
 import os
@@ -5,6 +6,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import threading
+import urllib.parse
 
 from playwright.sync_api import sync_playwright, expect
 
@@ -66,12 +68,25 @@ def main():
                 expect(page.locator(".media-cell")).to_have_count(6)
                 page.locator(".media-cell").first.click()
                 expect(page.locator(".viewer-page")).to_be_visible(timeout=10000)
+                expect(page.locator(".viewer-share")).to_be_visible()
                 page.screenshot(path=OUTPUT / "03-viewer.png", full_page=True)
                 page.locator(".viewer-back").click()
                 expect(page.locator(".manage-milestones")).to_be_visible()
                 page.locator(".manage-milestones").click()
                 expect(page.locator(".manage-cell").first).to_be_visible(timeout=10000)
                 page.screenshot(path=OUTPUT / "04-manage.png", full_page=True)
+
+                now = datetime.datetime.now()
+                shared_page = browser.new_page()
+                shared_page.on("pageerror", lambda error: errors.append(str(error)))
+                base_url = page.url.split("#")[0]
+                media = urllib.parse.quote("第一张照片.jpg", safe="")
+                shared_page.goto(f"{base_url}#/pages/viewer/viewer?media={media}&year={now.year}&month={now.month}")
+                expect(shared_page.locator(".auth-card")).to_be_visible(timeout=10000)
+                shared_page.locator(".auth-input input").fill("何与青")
+                shared_page.locator(".auth-button").click()
+                expect(shared_page.locator(".viewer-page")).to_be_visible(timeout=15000)
+                expect(shared_page.locator(".viewer-name")).to_have_text("第一张照片.jpg")
                 browser.close()
                 if errors:
                     raise AssertionError("Browser errors:\n" + "\n".join(errors))

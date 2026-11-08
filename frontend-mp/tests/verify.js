@@ -129,6 +129,7 @@ async function main() {
 
     await (await page.$('.media-cell')).tap()
     await waitFor(async () => (await miniProgram.currentPage()).path === 'pages/viewer/viewer', 'photo viewer')
+    assert.ok(await (await miniProgram.currentPage()).$('.viewer-share'))
     await sleep(800)
     await screenshot(miniProgram, '03-photo-viewer')
     await miniProgram.navigateBack()

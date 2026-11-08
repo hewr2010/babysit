@@ -13,14 +13,22 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
+import { onLoad } from '@dcloudio/uni-app'
 import { AUTH_KEY } from '@/config'
 
 const CORRECT_NAME = '何与青'
 const name = ref('')
 const error = ref('')
+const redirect = ref('')
+
+onLoad(options => {
+  if (options.redirect?.startsWith('/pages/viewer/viewer')) {
+    redirect.value = options.redirect
+  }
+})
 
 onMounted(() => {
-  if (uni.getStorageSync(AUTH_KEY) === 'true') goHome()
+  if (uni.getStorageSync(AUTH_KEY) === 'true') continueToTarget()
 })
 
 function verify() {
@@ -29,11 +37,11 @@ function verify() {
     return
   }
   uni.setStorageSync(AUTH_KEY, 'true')
-  goHome()
+  continueToTarget()
 }
 
-function goHome() {
-  uni.reLaunch({ url: '/pages/index/index' })
+function continueToTarget() {
+  uni.reLaunch({ url: redirect.value || '/pages/index/index' })
 }
 </script>
 

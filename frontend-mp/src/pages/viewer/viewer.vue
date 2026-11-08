@@ -3,8 +3,10 @@
     <view class="viewer-header" :style="{ paddingTop: `${statusBarHeight}px` }">
       <view class="viewer-back" @click="goBack">‹ 返回</view>
       <text>{{ store.media.length ? `${currentIndex + 1} / ${store.media.length}` : '媒体预览' }}</text>
-      <view v-if="current" class="viewer-mark" @click="editorVisible = true">标记</view>
-      <view v-else class="viewer-mark" />
+      <view class="viewer-actions">
+        <button v-if="current" class="viewer-share" open-type="share">转发</button>
+        <view v-if="current" class="viewer-mark" @click="editorVisible = true">标记</view>
+      </view>
     </view>
     <swiper v-if="current" class="viewer-swiper" :current="currentIndex" @change="changeMedia">
       <swiper-item v-for="(item, index) in store.media" :key="item.name" class="viewer-item">
@@ -22,7 +24,7 @@
         />
       </swiper-item>
     </swiper>
-    <view v-else class="viewer-empty">没有可预览的媒体</view>
+    <view v-else class="viewer-empty">{{ loadError || (loading ? '正在加载分享内容…' : '没有可预览的媒体') }}</view>
     <view v-if="current" class="viewer-footer">
       <view class="viewer-meta">
         <text class="viewer-name">{{ current.name }}</text>
@@ -37,10 +39,12 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onLoad, onUnload } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage, onUnload } from '@dcloudio/uni-app'
 import MilestoneEditor from '@/components/MilestoneEditor.vue'
+import { AUTH_KEY } from '@/config'
 import { previewUrl, saveToAlbum, thumbUrl, videoUrl } from '@/services/media'
 import { useAppStore } from '@/stores/app'
+import { mediaSharePath } from '@/utils/share'
 
 const store = useAppStore()
 const currentIndex = ref(0)
@@ -48,13 +52,60 @@ const statusBarHeight = ref(20)
 const saving = ref(false)
 const editorVisible = ref(false)
 const videoError = ref('')
+const loading = ref(false)
+const loadError = ref('')
 const current = computed(() => store.media[currentIndex.value])
 
-onLoad(options => {
+onLoad(async options => {
+  statusBarHeight.value = uni.getSystemInfoSync().statusBarHeight || 20
+  if (uni.getStorageSync(AUTH_KEY) !== 'true') {
+    const query = Object.entries(options).map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&')
+    const target = `/pages/viewer/viewer${query ? `?${query}` : ''}`
+    uni.reLaunch({ url: `/pages/auth/auth?redirect=${encodeURIComponent(target)}` })
+    return
+  }
+
+  if (options.media) {
+    await openSharedMedia(options)
+    return
+  }
   const index = Number.parseInt(options.index || '0', 10)
   currentIndex.value = Number.isInteger(index) && index >= 0 && index < store.media.length ? index : 0
-  statusBarHeight.value = uni.getSystemInfoSync().statusBarHeight || 20
 })
+
+onShareAppMessage(() => {
+  if (!current.value) return { title: '宝宝成长日志', path: '/pages/index/index' }
+  return {
+    title: `${store.baby?.name || '宝宝'}的${current.value.type === 'video' ? '新视频' : '新照片'}`,
+    imageUrl: current.value.type === 'video' ? thumbUrl(current.value.name) : previewUrl(current.value.name),
+    path: mediaSharePath(current.value)
+  }
+})
+
+async function openSharedMedia(options) {
+  loading.value = true
+  loadError.value = ''
+  try {
+    let index = store.media.findIndex(item => item.name === options.media)
+    const year = Number(options.year)
+    const month = Number(options.month)
+    if (index < 0 && Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12) {
+      store.year = year
+      store.month = month
+      await store.loadAlbum()
+      index = store.media.findIndex(item => item.name === options.media)
+    }
+    if (index < 0) {
+      loadError.value = '分享的内容不存在或尚未同步'
+      return
+    }
+    currentIndex.value = index
+  } catch (error) {
+    loadError.value = error.message || '分享内容加载失败'
+  } finally {
+    loading.value = false
+  }
+}
 
 onUnload(stopCurrentVideo)
 
@@ -70,7 +121,8 @@ function changeMedia(event) {
 }
 
 function goBack() {
-  uni.navigateBack()
+  if (getCurrentPages().length > 1) uni.navigateBack()
+  else uni.reLaunch({ url: '/pages/index/index' })
 }
 
 async function save() {
@@ -115,6 +167,21 @@ async function save() {
 .viewer-mark {
   color: #f9a8d4;
   text-align: right;
+}
+
+.viewer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 120rpx;
+}
+
+.viewer-share {
+  padding: 0 16rpx;
+  background: transparent;
+  color: #f9a8d4;
+  font-size: 26rpx;
+  line-height: 56rpx;
 }
 
 .viewer-swiper,
