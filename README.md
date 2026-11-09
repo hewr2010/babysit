@@ -96,7 +96,7 @@ python -m babysit.photo_sync daemon
 
 默认每 30 分钟处理最多 50 张新照片，相似度不低于 0.55 自动复制，0.35 到 0.55 进入人工确认。可分别通过 `PHOTO_SYNC_INTERVAL`、`PHOTO_SYNC_SCAN_LIMIT`、`PHOTO_SYNC_AUTO_THRESHOLD`、`PHOTO_SYNC_REVIEW_THRESHOLD` 调整。其他配置见 `babysit/photo_sync_config.py`。
 
-每轮会先读取目标目录进行对账：同名文件、带对应 `fs_id` 后缀的文件或 MD5 相同的文件都视为已经处理，不再运行人脸识别，也不占用每轮分析额度。因此本地 SQLite 不是完整的处理历史也没关系，不需要读取其他环境的生产数据库。积压照片通过 `scan_backlog` 分批续跑，目标目录无法读取时会停止本轮以避免重复复制。
+每轮会先读取目标目录进行对账：同名且 MD5 一致的文件、带对应 `fs_id` 后缀的文件或 MD5 相同的文件都视为已经处理，不再运行人脸识别，也不占用每轮分析额度。两台 iPhone 产生同名但 MD5 不同的文件时不会跳过，而是添加 `fs_id` 后缀后复制。因此本地 SQLite 不是完整的处理历史也没关系，不需要读取其他环境的生产数据库。积压照片通过 `scan_backlog` 分批续跑，目标目录无法读取时会停止本轮以避免重复复制。
 
 缩略图默认使用 4 路并发预取，可通过 `PHOTO_SYNC_DOWNLOAD_WORKERS` 调整（1 到 16）。存在积压时默认每 60 秒继续下一批，可通过 `PHOTO_SYNC_BACKLOG_INTERVAL` 调整；追平后恢复 `PHOTO_SYNC_INTERVAL` 指定的常规间隔。人脸识别和云端复制仍按顺序执行，不通过拼接缩小图片来牺牲小脸识别准确率。
 

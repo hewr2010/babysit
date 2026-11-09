@@ -152,7 +152,7 @@ class PhotoSyncTestCase(unittest.TestCase):
 
     def test_target_filename_is_processed_without_face_analysis(self):
         target = "/apps/bypy/爸妈与小宝/IMG_1.jpg"
-        target_files = [{"server_filename": "IMG_1.jpg", "path": target, "md5": "other"}]
+        target_files = [{"server_filename": "IMG_1.jpg", "path": target, "md5": "md5-1"}]
         service, store, copier, matcher = self.service(
             [[photo(1)]], {"1": 0.8}, target_files=target_files
         )
@@ -162,6 +162,20 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(store.get(1)["target_path"], target)
         self.assertEqual(matcher.calls, 0)
         self.assertEqual(copier.copies, [])
+
+    def test_same_filename_with_different_md5_is_not_skipped(self):
+        original = "/apps/bypy/爸妈与小宝/IMG_1.jpg"
+        target_files = [{"server_filename": "IMG_1.jpg", "path": original, "md5": "other"}]
+        copier = FakeCopier(existing={original})
+        service, store, _, matcher = self.service(
+            [[photo(1)]], {"1": 0.8}, copier, target_files
+        )
+
+        self.assertEqual(service.sync()["copied"], 1)
+        self.assertEqual(
+            store.get(1)["target_path"], "/apps/bypy/爸妈与小宝/IMG_1_1.jpg"
+        )
+        self.assertEqual(matcher.calls, 1)
 
     def test_target_fs_id_suffix_is_processed(self):
         target = "/apps/bypy/爸妈与小宝/IMG_1_1.jpg"

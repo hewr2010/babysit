@@ -115,13 +115,15 @@ class PhotoSyncService:
     @staticmethod
     def _existing_target(photo, target_names, target_md5s):
         filename = photo["server_filename"]
+        md5 = photo.get("md5")
         if filename in target_names:
-            return target_names[filename]
+            target_path, target_md5 = target_names[filename]
+            if not md5 or not target_md5 or md5 == target_md5:
+                return target_path
         path = Path(filename)
         suffixed_name = f"{path.stem}_{photo['fs_id']}{path.suffix}"
         if suffixed_name in target_names:
-            return target_names[suffixed_name]
-        md5 = photo.get("md5")
+            return target_names[suffixed_name][0]
         return target_md5s.get(md5) if md5 else None
 
     def sync(self, limit=None, dry_run=False):
@@ -131,7 +133,7 @@ class PhotoSyncService:
             raise ValueError("limit 必须大于 0")
         target_files = self.image_client.list_files(self.config.destination_path)
         target_names = {
-            item["server_filename"]: item["path"]
+            item["server_filename"]: (item["path"], item.get("md5"))
             for item in target_files
             if item.get("server_filename") and item.get("path")
         }
@@ -201,7 +203,10 @@ class PhotoSyncService:
                 if outcome == "copied":
                     item = self.store.get(fs_id)
                     target_name = item["target_path"].rsplit("/", 1)[-1]
-                    target_names[target_name] = item["target_path"]
+                    target_names[target_name] = (
+                        item["target_path"],
+                        photo.get("md5"),
+                    )
                     if photo.get("md5"):
                         target_md5s[photo["md5"]] = item["target_path"]
             processed += len(candidates)
