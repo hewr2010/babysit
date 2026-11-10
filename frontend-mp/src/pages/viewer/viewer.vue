@@ -1,6 +1,6 @@
 <template>
-  <view class="viewer-page">
-    <view class="viewer-header" :style="{ paddingTop: `${statusBarHeight}px` }">
+  <view class="viewer-page" @touchstart="onTouchStart" @touchend="onTouchEnd" @touchcancel="resetGesture">
+    <view class="viewer-header" :style="{ paddingTop: `${statusBarHeight}px`, paddingRight: `${headerRightPadding}px` }">
       <view class="viewer-back" @click="goBack">‹ 返回</view>
       <text>{{ store.media.length ? `${currentIndex + 1} / ${store.media.length}` : '媒体预览' }}</text>
       <view class="viewer-actions">
@@ -10,7 +10,19 @@
     </view>
     <swiper v-if="current" class="viewer-swiper" :current="currentIndex" @change="changeMedia">
       <swiper-item v-for="(item, index) in store.media" :key="item.name" class="viewer-item">
-        <image v-if="item.type !== 'video'" class="viewer-media" :src="previewUrl(item.name)" mode="aspectFit" />
+        <movable-area v-if="item.type !== 'video'" class="viewer-media zoom-area" scale-area>
+          <movable-view
+            class="zoom-view"
+            direction="all"
+            scale
+            :scale-value="zoomValue"
+            :scale-min="1"
+            :scale-max="4"
+            @scale="onScale"
+          >
+            <image class="viewer-media" :src="previewUrl(item.name)" mode="aspectFit" />
+          </movable-view>
+        </movable-area>
         <video
           v-else-if="index === currentIndex"
           :id="`media-video-${index}`"
@@ -20,6 +32,7 @@
           object-fit="contain"
           controls
           autoplay
+          loop
           @error="videoError = '视频加载失败，请稍后重试'"
         />
       </swiper-item>
@@ -49,15 +62,25 @@ import { mediaSharePath } from '@/utils/share'
 const store = useAppStore()
 const currentIndex = ref(0)
 const statusBarHeight = ref(20)
+const headerRightPadding = ref(24)
+const zoomValue = ref(1)
 const saving = ref(false)
 const editorVisible = ref(false)
 const videoError = ref('')
 const loading = ref(false)
 const loadError = ref('')
 const current = computed(() => store.media[currentIndex.value])
+let gestureStart = null
 
 onLoad(async options => {
-  statusBarHeight.value = uni.getSystemInfoSync().statusBarHeight || 20
+  const system = uni.getSystemInfoSync()
+  statusBarHeight.value = system.statusBarHeight || 20
+  try {
+    const menuButton = uni.getMenuButtonBoundingClientRect()
+    if (menuButton?.left) {
+      headerRightPadding.value = Math.ceil(system.windowWidth - menuButton.left + 12)
+    }
+  } catch (error) {}
   if (uni.getStorageSync(AUTH_KEY) !== 'true') {
     const query = Object.entries(options).map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&')
     const target = `/pages/viewer/viewer${query ? `?${query}` : ''}`
@@ -118,6 +141,32 @@ function changeMedia(event) {
   stopCurrentVideo()
   currentIndex.value = event.detail.current
   videoError.value = ''
+  zoomValue.value = 1
+  resetGesture()
+}
+
+function onScale(event) {
+  zoomValue.value = event.detail.scale
+}
+
+function onTouchStart(event) {
+  if (!event.touches || event.touches.length !== 1 || zoomValue.value > 1.05) {
+    resetGesture()
+    return
+  }
+  gestureStart = { x: event.touches[0].clientX, y: event.touches[0].clientY }
+}
+
+function onTouchEnd(event) {
+  if (!gestureStart || !event.changedTouches?.length) return
+  const deltaX = event.changedTouches[0].clientX - gestureStart.x
+  const deltaY = event.changedTouches[0].clientY - gestureStart.y
+  resetGesture()
+  if (deltaY > 80 && deltaY > Math.abs(deltaX) * 1.2) goBack()
+}
+
+function resetGesture() {
+  gestureStart = null
 }
 
 function goBack() {
@@ -193,6 +242,18 @@ async function save() {
 .viewer-media {
   width: 100%;
   height: 100%;
+}
+
+.zoom-area,
+.zoom-view {
+  width: 100%;
+  height: 100%;
+}
+
+.zoom-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .viewer-empty {
