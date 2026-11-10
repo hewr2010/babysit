@@ -195,6 +195,13 @@ class BaiduPCSClient:
     def exists(self, remote_path):
         return self._run("meta", remote_path).returncode == 0
 
+    def ensure_directory(self, remote_path):
+        if self.exists(remote_path):
+            return
+        result = self._run("mkdir", remote_path)
+        if not self.exists(remote_path):
+            raise RuntimeError(f"创建目录失败：{self._output(result)}")
+
     def copy(self, source_path, target_path):
         result = self._run("cp", source_path, target_path)
         if self.exists(target_path):

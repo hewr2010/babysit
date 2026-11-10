@@ -102,6 +102,10 @@ python -m babysit.photo_sync daemon
 
 `.livp`、`.mp4`、`.mov` 不再只分析网盘封面：同步进程会下载视频并抽帧，短视频约每 0.5 秒一帧，长视频最多覆盖 24 个时间点，使用最佳帧的人脸相似度。下载遇到 0B 或网络抖动会退避重试，抽帧结果会缓存复用。
 
+灰区文件会复制到 `/apps/bypy/爸妈与小宝-review` 并标记为 `review_copied`，每轮新增灰区文件会合并发送一条 Bark 通知。通知使用环境变量 `BARK_KEY`（未设置时读取 `~/.zshrc` 中的配置），通知失败不会中断同步，已归档项目不会重复通知。可用 `PHOTO_SYNC_REVIEW_DESTINATION_PATH` 修改灰区目录，随时执行 `python -m babysit.photo_sync sync-reviews` 补齐归档。
+
+手动删除灰区文件不会触发重复复制；手动复制到 `/apps/bypy/爸妈与小宝` 后，下一轮对账会标记为正式 `copied`。`approve <fs_id>` 也可将灰区文件复制到正式相册，`reject <fs_id>` 则标记为不匹配。
+
 #### 识别回归 benchmark 与历史重扫
 
 私人样本和帧文件保存在被 Git 忽略的 `babysit/data/photo_sync_bmk/`，不会提交到仓库。运行回归：

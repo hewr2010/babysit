@@ -9,19 +9,24 @@ import requests
 
 from .baidu_sync import BaiduImageClient, BaiduPCSClient
 from .face_matcher import InsightFaceMatcher
+from .notifier import BarkNotifier
 from .photo_sync_config import PhotoSyncConfig
 from .photo_sync_db import HANDLED_STATUSES, PhotoSyncStore
 from .video_frames import VIDEO_EXTENSIONS, VideoFrameExtractor
 
 
 class PhotoSyncService:
-    def __init__(self, config, store=None, image_client=None, copier=None, matcher=None):
+    def __init__(
+        self, config, store=None, image_client=None, copier=None, matcher=None,
+        notifier=None,
+    ):
         self.config = config
         self.store = store or PhotoSyncStore(config.db_path)
         self.image_client = image_client or BaiduImageClient(
             config.source_path, page_size=config.page_size
         )
         self.copier = copier or BaiduPCSClient(config.baidupcs_bin)
+        self.notifier = notifier or BarkNotifier()
         self._matcher = matcher
         self._video_extractor = None
 
@@ -43,16 +48,15 @@ class PhotoSyncService:
             )
         return self._video_extractor
 
-    def _target_path(self, item):
+    def _target_path(self, item, destination_path=None):
+        destination_path = destination_path or self.config.destination_path
         if item.get("target_path"):
             return item["target_path"]
         filename = item["filename"]
-        candidate = f"{self.config.destination_path}/{filename}"
+        candidate = f"{destination_path}/{filename}"
         if self.copier.exists(candidate):
             path = Path(filename)
-            candidate = (
-                f"{self.config.destination_path}/{path.stem}_{item['fs_id']}{path.suffix}"
-            )
+            candidate = f"{destination_path}/{path.stem}_{item['fs_id']}{path.suffix}"
         return candidate
 
     def copy_item(self, item):
@@ -71,6 +75,31 @@ class PhotoSyncService:
             flush=True,
         )
         return target_path
+
+    def copy_review_item(self, item):
+        destination = self.config.review_destination_path
+        target_path = self._target_path(item, destination)
+        self.store.set_review_target(item["fs_id"], target_path)
+        self.copier.copy(item["source_path"], target_path)
+        self.store.set_review_copied(item["fs_id"], target_path)
+        print(f"{time.strftime('%Y-%m-%d %H:%M:%S')} 待确认：{item['source_path']}", flush=True)
+        return target_path
+
+    def sync_reviews(self):
+        items = self.store.list_items("review", limit=10000)
+        if not items:
+            return []
+        self.copier.ensure_directory(self.config.review_destination_path)
+        copied = []
+        for item in items:
+            try:
+                self.copy_review_item(item)
+                copied.append(item)
+            except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
+                print(f"待确认复制失败 {item['filename']}：{exc}", flush=True)
+        if copied:
+            self.notifier.notify_review(copied, self.config.review_destination_path)
+        return copied
 
     def _record_error(self, fs_id, exc):
         item = self.store.set_error(fs_id, exc)
@@ -237,6 +266,7 @@ class PhotoSyncService:
             if len(page) < self.config.page_size:
                 break
         self.store.set_state("scan_backlog", "1" if limit_hit else "0")
+        results["review_copied"] = 0 if dry_run else len(self.sync_reviews())
         return results
 
     def approve(self, fs_id):
@@ -245,6 +275,8 @@ class PhotoSyncService:
             raise ValueError(f"找不到同步记录 {fs_id}")
         if item["status"] == "copied":
             return item["target_path"]
+        if item["status"] == "review_copied":
+            item = {**item, "target_path": None}
         return self.copy_item(item)
 
     def reject(self, fs_id):
@@ -283,7 +315,8 @@ def _print_results(results):
     print(
         time.strftime("%Y-%m-%d %H:%M:%S"),
         "本轮：复制 {copied}，目标已有 {existing}，待确认 {review}，"
-        "跳过不匹配 {rejected}，失败 {error}，已处理 {skipped}".format(**results),
+        "灰区已归档 {review_copied}，跳过不匹配 {rejected}，"
+        "失败 {error}，已处理 {skipped}".format(**results),
         flush=True,
     )
 
@@ -295,7 +328,7 @@ def _print_recent(store, hours, limit, show_all=False):
     cutoff = (now - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
     counts = store.counts_since(cutoff)
     copied = counts.get("copied", 0)
-    review = counts.get("review", 0)
+    review = counts.get("review", 0) + counts.get("review_copied", 0)
     rejected = counts.get("rejected", 0)
     error = counts.get("error", 0)
     print(
@@ -304,12 +337,13 @@ def _print_recent(store, hours, limit, show_all=False):
         f"不匹配 {rejected}，失败 {error}",
         flush=True,
     )
-    statuses = None if show_all else ("copied", "review")
+    statuses = None if show_all else ("copied", "review", "review_copied")
     items = store.list_recent(cutoff, limit, statuses)
     print(f"最近 {len(items)} 条（按处理时间）：", flush=True)
     labels = {
         "copied": "已复制/已有",
         "review": "待确认",
+        "review_copied": "待确认已归档",
         "rejected": "不匹配",
         "error": "失败",
         "pending": "待处理",
@@ -368,6 +402,7 @@ def main(argv=None):
     requeue_parser.add_argument("--status", choices=["rejected", "review"])
     requeue_parser.add_argument("--videos-only", action="store_true")
 
+    subparsers.add_parser("sync-reviews", help="归档所有待确认文件并发送 Bark")
     subparsers.add_parser("doctor", help="检查授权、参考照片和来源目录")
     args = parser.parse_args(argv)
 
@@ -418,6 +453,9 @@ def main(argv=None):
             statuses = [args.status] if args.status else ["rejected", "review"]
             count = service.store.requeue(statuses, args.videos_only)
             print(f"已重新排队 {count} 个文件")
+        elif args.command == "sync-reviews":
+            copied = service.sync_reviews()
+            print(f"已归档 {len(copied)} 个待确认文件")
         elif args.command == "doctor":
             result = service.doctor()
             print(f"来源目录读取成功，本页返回 {result['photos_visible']} 张照片")

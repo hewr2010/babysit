@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 
-HANDLED_STATUSES = {"copied", "rejected", "review"}
+HANDLED_STATUSES = {"copied", "rejected", "review", "review_copied"}
 
 
 class PhotoSyncStore:
@@ -123,6 +123,29 @@ class PhotoSyncStore:
             """
             UPDATE photo_sync_items
             SET status = 'copying', target_path = ?, error = NULL,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE fs_id = ?
+            """,
+            (target_path, str(fs_id)),
+        )
+        self.db.commit()
+
+    def set_review_target(self, fs_id, target_path):
+        self.db.execute(
+            """
+            UPDATE photo_sync_items
+            SET target_path = ?, error = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE fs_id = ?
+            """,
+            (target_path, str(fs_id)),
+        )
+        self.db.commit()
+
+    def set_review_copied(self, fs_id, target_path):
+        self.db.execute(
+            """
+            UPDATE photo_sync_items
+            SET status = 'review_copied', target_path = ?, error = NULL,
                 updated_at = CURRENT_TIMESTAMP
             WHERE fs_id = ?
             """,

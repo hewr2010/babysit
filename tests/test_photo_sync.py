@@ -84,6 +84,18 @@ class FakeCopier:
         self.copies.append((source_path, target_path))
         self.existing.add(target_path)
 
+    def ensure_directory(self, remote_path):
+        self.existing.add(remote_path)
+
+
+class FakeNotifier:
+    def __init__(self):
+        self.calls = []
+
+    def notify_review(self, items, destination):
+        self.calls.append(([item["fs_id"] for item in items], destination))
+        return True
+
 
 class PhotoSyncTestCase(unittest.TestCase):
     def setUp(self):
@@ -92,6 +104,7 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.config = PhotoSyncConfig(
             source_path="/来自：手机",
             destination_path="/apps/bypy/爸妈与小宝",
+            review_destination_path="/apps/bypy/爸妈与小宝-review",
             reference_dir=root / "references",
             cache_dir=root / "thumbnails",
             db_path=root / "sync.db",
@@ -121,6 +134,7 @@ class PhotoSyncTestCase(unittest.TestCase):
             copier=copier or FakeCopier(),
             matcher=matcher,
         )
+        service.notifier = FakeNotifier()
         self.addCleanup(store.close)
         return service, store, service.copier, matcher
 
@@ -163,6 +177,24 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(service.sync()["copied"], 1)
         self.assertTrue(extractor.called)
         self.assertEqual(store.get(1)["status"], "copied")
+
+    def test_review_is_archived_and_notified_only_once(self):
+        service, store, copier, _ = self.service([[photo(1)]], {"1": 0.45})
+
+        results = service.sync()
+        self.assertEqual(results["review"], 1)
+        self.assertEqual(results["review_copied"], 1)
+        self.assertEqual(store.get(1)["status"], "review_copied")
+        self.assertEqual(
+            store.get(1)["target_path"],
+            "/apps/bypy/爸妈与小宝-review/IMG_1.jpg",
+        )
+        self.assertEqual(len(service.notifier.calls), 1)
+        self.assertEqual(len(copier.copies), 1)
+
+        self.assertEqual(service.sync()["review_copied"], 0)
+        self.assertEqual(len(service.notifier.calls), 1)
+        self.assertEqual(len(copier.copies), 1)
 
     def test_medium_and_low_scores_and_no_face(self):
         service, store, _, _ = self.service(
@@ -316,7 +348,7 @@ class PhotoSyncTestCase(unittest.TestCase):
         service.reject(2)
         self.assertEqual(store.get(1)["status"], "copied")
         self.assertEqual(store.get(2)["status"], "rejected")
-        self.assertEqual(len(copier.copies), 1)
+        self.assertEqual(len(copier.copies), 3)
 
     def test_changed_content_is_pending_again(self):
         store = PhotoSyncStore(self.config.db_path)
@@ -347,6 +379,7 @@ class PhotoSyncTestCase(unittest.TestCase):
         config = type(config)(
             source_path="/来自：手机",
             destination_path="/来自：手机/精选",
+            review_destination_path=config.review_destination_path,
             reference_dir=config.reference_dir,
             cache_dir=config.cache_dir,
             db_path=config.db_path,

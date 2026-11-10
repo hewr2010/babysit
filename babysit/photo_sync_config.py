@@ -9,6 +9,7 @@ from .config import BAIDU_REMOTE_PATH, DATA_DIR, DB_PATH
 class PhotoSyncConfig:
     source_path: str
     destination_path: str
+    review_destination_path: str
     reference_dir: Path
     cache_dir: Path
     db_path: Path
@@ -36,6 +37,9 @@ class PhotoSyncConfig:
         return cls(
             source_path=os.environ.get("PHOTO_SYNC_SOURCE_PATH", "").rstrip("/"),
             destination_path=destination.rstrip("/"),
+            review_destination_path=os.environ.get(
+                "PHOTO_SYNC_REVIEW_DESTINATION_PATH", "/apps/bypy/爸妈与小宝-review"
+            ).rstrip("/"),
             reference_dir=Path(
                 os.environ.get(
                     "PHOTO_SYNC_REFERENCE_DIR",
@@ -74,8 +78,10 @@ class PhotoSyncConfig:
             raise ValueError("请设置 PHOTO_SYNC_SOURCE_PATH 为手机照片备份目录")
         if self.source_path == "/":
             raise ValueError("PHOTO_SYNC_SOURCE_PATH 不能是网盘根目录")
-        if self.destination_path == "/":
-            raise ValueError("PHOTO_SYNC_DESTINATION_PATH 不能是网盘根目录")
+        if self.destination_path == "/" or self.review_destination_path == "/":
+            raise ValueError("目标目录和灰区目录不能是网盘根目录")
+        if self.review_destination_path == self.destination_path:
+            raise ValueError("灰区目录不能与正式相册目录相同")
         if self.source_path and self.destination_path.startswith(self.source_path + "/"):
             raise ValueError("目标目录不能位于来源目录内，否则会重复扫描已复制照片")
         if not -1 <= self.review_threshold < self.auto_threshold <= 1:
