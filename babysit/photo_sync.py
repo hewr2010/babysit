@@ -100,8 +100,7 @@ class PhotoSyncService:
         return copied
 
     def _pending_review_count(self):
-        counts = self.store.counts()
-        return counts.get("review", 0) + counts.get("review_copied", 0)
+        return self.store.counts().get("review", 0)
 
     def _notify_round(self, results):
         activity_keys = ("copied", "existing", "review", "rejected", "error")

@@ -219,6 +219,7 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(len(copier.copies), 1)
 
         self.assertEqual(service.sync()["review_copied"], 0)
+        self.assertEqual(service._pending_review_count(), 0)
         self.assertEqual(len(service.notifier.calls), 1)
         self.assertEqual(len(copier.copies), 1)
 
