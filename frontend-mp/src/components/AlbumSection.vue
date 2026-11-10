@@ -3,7 +3,7 @@
     <view class="section-heading">
       <view class="album-heading-copy">
         <text class="section-title">{{ store.selectedMonthLabel }}相册</text>
-        <text class="album-hint">长按照片可标记 / 转发</text>
+        <text class="album-hint">点 ··· 可标记 / 转发</text>
       </view>
       <text class="album-count">{{ store.albumLoading ? '加载中…' : `${store.media.length} 项` }}</text>
     </view>
@@ -18,6 +18,7 @@
           <image class="media-thumb" :src="thumbUrl(item.name)" mode="aspectFill" lazy-load />
           <view v-if="item.type === 'video'" class="video-badge">▶</view>
           <view v-if="milestoneNames.has(item.name)" class="milestone-badge">⭐</view>
+          <button class="media-menu-button" @click.stop="showActions(item)">···</button>
           <text v-if="item.time" class="media-time">{{ item.time }}</text>
         </view>
       </view>
@@ -215,12 +216,28 @@ async function saveCurrent() {
 .milestone-badge {
   position: absolute;
   top: 8rpx;
-  right: 8rpx;
+  left: 8rpx;
   padding: 4rpx 8rpx;
   border-radius: 16rpx;
   background: rgba(236, 72, 153, 0.9);
   font-size: 20rpx;
   line-height: 1.2;
+}
+
+.media-menu-button {
+  position: absolute;
+  z-index: 1;
+  top: 8rpx;
+  right: 8rpx;
+  width: 52rpx;
+  height: 52rpx;
+  padding: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  text-align: center;
+  line-height: 46rpx;
+  font-size: 28rpx;
 }
 
 .album-actions {
