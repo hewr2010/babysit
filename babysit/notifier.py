@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
@@ -51,6 +52,14 @@ class BarkNotifier:
             pass
         return None
 
+    @staticmethod
+    def _notification_url(url, title, body):
+        if "/title/body" in url:
+            return url.replace(
+                "/title/body", f"/{quote(title, safe='')}/{quote(body, safe='')}", 1
+            )
+        return url
+
     def notify_round(self, results, pending_review):
         activity_keys = ("copied", "existing", "review", "rejected", "error")
         if not any(results.get(key, 0) for key in activity_keys):
@@ -68,7 +77,7 @@ class BarkNotifier:
         for url in self.urls:
             try:
                 response = requests.post(
-                    url,
+                    self._notification_url(url, "宝宝照片同步汇总", body),
                     data={
                         "title": "宝宝照片同步汇总",
                         "body": body,

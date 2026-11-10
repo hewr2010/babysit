@@ -29,6 +29,18 @@ class BarkNotifierTests(unittest.TestCase):
         self.assertIn("当前待人工处理 7 个", body)
         self.assertIn("不匹配 20 个", body)
 
+    @patch("babysit.notifier.requests.post")
+    def test_title_body_placeholder_is_replaced(self, post):
+        notifier = BarkNotifier(
+            urls=["https://example.test/title/body?group=example&ttl=600"]
+        )
+        self.assertTrue(notifier.notify_round({"copied": 1}, 2))
+        url = post.call_args.args[0]
+        self.assertNotIn("/title/body", url)
+        self.assertIn("%E5%AE%9D%E5%AE%9D", url)
+        self.assertIn("group=example", url)
+        self.assertIn("ttl=600", url)
+
     def test_urls_can_be_loaded_from_ignored_file(self):
         import tempfile
         from pathlib import Path
