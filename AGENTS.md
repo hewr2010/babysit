@@ -133,23 +133,169 @@ frontend/src/
 
 ## 后台进程
 
-`refresh_media.py` - 独立进程，每 3 分钟运行：
-1. 从百度网盘获取文件列表
-2. 生成缩略图和预览图
-3. 提取 .livp 视频
-4. 更新数据库
+`refresh_media.py` 每 3 分钟从正式相册获取文件，生成缩略图、预览图、提取 Live Photo 视频并更新 `media_files`。它只负责展示，不负责判断照片中是否有女儿。全量补历史缓存可能很慢，调试单个文件时优先调用 `process_media_file()`，不要无必要地全量刷新。
 
-`photo_sync.py`（可选）- 独立照片筛选进程：
-1. 通过官方图片列表接口增量读取手机备份目录
-2. 每轮先对账目标目录，同名且 MD5 一致、`fs_id` 后缀或内容 MD5 相同即视为已处理
-3. 并发预取缩略图，在本地用 InsightFace 逐张识别女儿，视频解包抽帧并取最佳帧，低置信度时通过重叠分块放大识别镜中脸
-4. 参考照片必须且只能包含一张人脸，多人合照禁止入库，避免家长特征污染
-5. 高分照片通过 BaiduPCS-Go 串行复制到 `/apps/bypy/爸妈与小宝`
-6. 灰区照片复制到 `/apps/bypy/爸妈与小宝-review`；每轮汇总通过 `BARK_URLS` 多地址发送，手动删除或复制到正式相册后由对账更新状态
-7. backlog 每 60 秒续跑，追平后恢复常规间隔，配置见 README
-8. 使用 `python -m babysit.photo_sync daemon` 运行
-9. `daemon.log` 记录每张实际复制文件和每轮汇总，无需单独运行观察进程
-10. 使用 `python -m babysit.photo_sync_bmk` 回归识别效果，私人样本不进 Git
+## 照片同步方案（当前实现）
+
+### 1. 总体链路和目录
+
+```text
+两台 iPhone → /来自：iPhone
+  → 官方 imagelist 增量读取元数据/缩略图
+  → 本地 InsightFace 人脸及分块识别
+  → 高分复制到 /apps/bypy/爸妈与小宝
+  → 灰区复制到 /apps/bypy/爸妈与小宝-review 并发送 Bark
+  → refresh_media.py 负责展示缓存和 media_files 入库
+```
+
+- 正式目录：`/apps/bypy/爸妈与小宝`
+- 人工灰区：`/apps/bypy/爸妈与小宝-review`
+- 来源文件只复制，不移动、不删除。
+- 手机自动备份目的地是固定的，不能改为 bypy 应用目录。官方 `filemanager` 和下载接口也只允许 `/apps/{appname}`，所以读取元数据用官方 API，跨目录复制/下载用 BaiduPCS-Go。
+- bypy CLI 自身限制在 `/apps/bypy`，但现有 OAuth token 的 `imagelist` 可以读取 `/来自：iPhone`，这是已验证行为，不要误判为 token 无效。
+
+### 2. 授权与秘密信息
+
+- 官方列表、元数据、缩略图：`babysit/baidu.py:get_access_token()` 复用 `~/.bypy/bypy.json`，也可用 `BABYSIT_BAIDU_ACCESS_TOKEN` 覆盖。
+- 全网盘复制和下载：BaiduPCS-Go，配置目录固定在 `babysit/data/photo_sync/baidupcs-config`。
+- `BaiduPCS-Go who` 返回 `uid: 0` 也代表未登录，不能只看退出码。配置目录不一致会出现“一个命令已登录、另一个命令 user not exists”，所有调用必须统一配置目录。
+- 首次登录可通过 WebBridge 复用浏览器现有百度会话，完成后关闭标签组和网络捕获。不要打印、提交或临时保存 Cookie。
+- 不读取、不依赖生产环境数据库。本地 DB 不完整时，以网盘目标目录对账为准。
+- Bark URL 不进 Git。可用 `BARK_URLS` 逗号分隔，或被忽略的 `babysit/data/photo_sync/bark-urls.txt`（每行一个 URL，也可指定 `BARK_URLS_FILE`）。`BARK_KEY`/`~/.zshrc` 仅作回退。
+
+### 3. 增量、去重和两台 iPhone
+
+每轮先做目标目录对账，再做识别：
+
+- `fs_id` 是主键，文件名只用于展示，不能单独作为去重依据。
+- 同名且 MD5 一致：视为已处理。
+- 同名但 MD5 不同：不是同一文件，继续识别，目标文件名添加 `_fs_id` 后缀，避免两台设备互相覆盖。
+- 已带对应 `_fs_id` 后缀的文件：视为已处理。
+- 任意目标文件与来源 MD5 相同：即使改名也视为已处理。
+- 本轮复制成功后立即更新内存中的目标索引，避免同轮重复复制。
+- 复制前先持久化 `target_path`，崩溃后复用同一路径；只有网盘目标校验成功才标记 `copied`。
+
+分页和 backlog：
+
+- `imagelist` 按修改时间倒序，默认每页 100、每轮最多识别 50 个新文件。
+- `scan_backlog=0` 时，如果当前页全部已处理，可提前停止。
+- 初次处理或重排历史时必须确保 `scan_backlog=1`，否则可能“requeue 了但根本扫不到旧文件”。有积压时每 60 秒一批，追平后恢复 1800 秒。
+- `fs_id + MD5` 防止双设备、同名和延迟上传漏扫；不要只依赖文件名或拍摄日期。`server_mtime` 用于扫描，`local_mtime` 可能才是拍摄时间。
+
+### 4. 状态机和失败恢复
+
+`photo_sync_items` 保存 `fs_id/source_path/filename/md5/size/server_mtime/thumbnail_path/face_score/face_count/status/target_path/error/retry_count/timestamps`。
+
+主要状态：
+
+- `pending`：待识别。
+- `matched`：已达到自动复制阈值，待复制。
+- `copying`：复制中。
+- `copied`：正式目录已存在或已复制成功。
+- `rejected`：分数过低或无人脸，本轮不再处理。
+- `review`：待人工确认，尚未归档。
+- `review_copied`：已复制到灰区目录，不重复归档/通知。
+- `error`：暂时性失败，默认最多重试 10 次，之后进入人工 review。
+- `HANDLED_STATUSES = copied/rejected/review/review_copied`，这些不会被普通增量扫描重复分析。
+
+下载与视频异常：
+
+- 缩略图 4 路并发预取，单文件失败不影响整批。
+- BaiduPCS-Go 可能退出码为 0 但返回 0B，必须校验目标文件非空并最多重试 3 次、指数退避。
+- 损坏 zip、无视频流、ffprobe/ffmpeg 错误统一转为可重试错误，删除损坏原文件避免复用；不能让 daemon 退出。
+- `CalledProcessError` 不属于普通 OSError，必须显式转换处理。
+
+### 5. 人脸参考库与阈值
+
+- 只使用**单人、清晰、近期**的宝宝照片。多人合照一律跳过，因为“取最大人脸”会把爸爸/妈妈特征训练进去，曾造成父母视频误复制。
+- 新生儿和近月龄照片要同时保留，定期补充，避免年龄变化导致 recall 下降。
+- 当前阈值：全图自动复制 `0.54`，人工灰区 `0.35`。灰区归档不影响自动复制阈值。
+- `dry_run` 只做识别，不复制、不发 Bark；高分也进入 review 供检查。
+
+不要通过全局降低阈值解决漏检。负样本里父母、舞台人物、包包和文字截图都曾被验证过，阈值和参考库必须一起评估。
+
+### 6. 静态照片、视频和镜中脸
+
+静态照片：
+
+- 先全图识别；低置信度时做 2×2 重叠分块。
+- 四个区域分别占原图 60%×60%，位置为 `(0,0)/(0.4,0)/(0,0.4)/(0.4,0.4)`，每块放大 2 倍。
+- 分块自动复制阈值 `0.50`，用于镜中脸和远距离小脸。返回最佳分块路径供审核和展示。
+
+视频：
+
+- `.livp` 先按 zip 解出 `.mov`，不能只看封面。
+- 时长 ≤4 秒时每 0.5 秒抽帧；更长视频至少每 2 秒一帧，最多覆盖 24 个时间点。
+- 每帧使用全图+分块逻辑，取最高相似度及最佳帧。
+- 实际很多 `.livp` 只有 1–3 秒，不要根据用户描述的时长猜实现，先 ffprobe 验证。
+
+镜中脸已验证案例：`2026-11-08 181218.heic`。全图无人脸，分块后约 0.50，已能复制到正式目录。该案例必须保留在本地 benchmark 中，防止回退。
+
+### 7. 灰区和人工处理
+
+- `review` 项会复制到 `爸妈与小宝-review` 并变为 `review_copied`，随后发送汇总 Bark。
+- 你手动删除灰区文件：不重新复制。
+- 你手动复制到正式目录：下一轮对账会改为正式 `copied`。
+- `approve <fs_id>` 也可复制到正式目录，`reject <fs_id>` 标记不匹配。
+- 每轮只发有实际活动的汇总，空轮不发。内容包括新复制、目标已有、灰区新增、已归档、当前待人工处理、不匹配和失败数。
+- 多个 Bark 地址独立请求，单个超时/失败不影响另一个，也不能阻断同步。
+- 可用 Cron 定时检查 pending/backlog，完成后发送“存量处理完成”并删除监控任务，不要另开长期观察进程。
+
+### 8. 已验证不能简单使用的方法
+
+- **不要拼接很多图片缩小后做人脸识别**：推理不是主要瓶颈，且镜中脸/小脸会更难识别。
+- **不要仅凭身体/衣服 ReID 自动复制**：遮脸测试不稳定，且包包也有人形高分，已验证并撤回。
+- **不要把 body bbox 当有人就进灰区**：负样本误报明显。
+- **不要依赖百度原生“宝宝”模糊标签**：覆盖不全；`unisearch` 也曾返回 params error，不能当唯一来源。
+- **不要仅凭“处理过”就声称“找全了”**：必须看具体文件状态、实际目标路径和用户指出的漏检画面。
+
+### 9. 性能与缓存
+
+- 实测人脸推理约 0.187 秒/张，主要瓶颈是缩略图下载和等待，不是模型。
+- 缩略图默认 4 路并发预取，避免共享 requests.Session 的线程安全问题。
+- 复用已有缩略图和 `video_work/<fs_id>/frame-*.jpg`，重扫时不重复下载。
+- 复制仍串行执行，防止并发复制冲突。
+- 日志在 `babysit/data/photo_sync/daemon.log`，每张实际复制和每轮汇总都在同一进程里，无需额外观察进程。
+
+### 10. Benchmark 与历史重扫
+
+私人样本、原视频、帧和报告都放在被忽略的 `babysit/data/photo_sync_bmk/`，不进 Git。当前基线包含 12 个正例、18 个负例及镜中脸专项，历史最好成绩为正例全通过、负例零误报；修改参考库、分块或阈值后必须重新跑，不能引用旧结果。
+
+```bash
+.venv/bin/python -m babysit.photo_sync_bmk \
+  --references babysit/data/photo_sync/references \
+  --output babysit/data/photo_sync_bmk/report.json
+```
+
+历史算法变化后：
+
+1. 暂停唯一的 `babysit:sync`。
+2. 用 `requeue` 重排 `rejected/review`，可 `--videos-only` 或 `--status rejected`。
+3. 对老文件确认 `scan_backlog=1`，再恢复同一个 daemon。
+4. 等 pending/error 为 0、backlog 为 0 后再评估实际复制结果。
+
+### 11. tmux 和常用操作
+
+只允许一个 `babysit` session，任务以 window 形式存在；不要新建 `babysit-photo-*` 等 session。当前同步进程也只有一个，避免并发处理同一批文件。
+
+```bash
+.venv/bin/python -m babysit.photo_sync doctor
+.venv/bin/python -m babysit.photo_sync sync --dry-run --limit 20
+.venv/bin/python -m babysit.photo_sync status
+.venv/bin/python -m babysit.photo_sync recent --hours 24 --limit 20
+.venv/bin/python -m babysit.photo_sync sync-reviews
+.venv/bin/python -m babysit.photo_sync requeue --videos-only
+
+tail -f babysit/data/photo_sync/daemon.log
+tmux attach -t babysit
+```
+
+## H5 查看器当前交互
+
+- 未放大：左右翻页、下滑关闭。
+- 双击放大/还原，双指 1–4 倍缩放，放大后单指拖动；桌面支持滚轮。
+- 放大后上下关闭和左右翻页都被抑制，视频保留原生控件。
+- 下滑返回必须跟随手势向下离场，而不是横向退出；相关测试在 `tests/test_iphone_photo_viewer.py`。
 
 ## API 端点
 
