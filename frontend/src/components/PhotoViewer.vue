@@ -1,7 +1,7 @@
 <template>
   <Teleport to="body">
     <Transition name="fade">
-      <div v-if="modalStore.photoViewer" class="viewer-overlay" @click.self="close">
+      <div v-if="modalStore.photoViewer" class="viewer-overlay" :style="dismissStyle" @click.self="close">
         <button class="close-btn" @click="close">✕</button>
 
         <!-- 滑动相册容器 -->
@@ -261,14 +261,17 @@ window.addEventListener('milestone-updated', () => {
 })
 
 function close() {
-  modalStore.photoViewer = false
-  loadError.value = ''
-  milestones.value = []
+  dismissOffset.value = 100
+  setTimeout(() => {
+    modalStore.photoViewer = false
+    loadError.value = ''
+    milestones.value = []
 
-  if (route.query.photo && !route.path.includes('/milestones/manage')) {
-    const { photo, ...otherQuery } = route.query
-    router.replace({ query: otherQuery })
-  }
+    if (route.query.photo && !route.path.includes('/milestones/manage')) {
+      const { photo, ...otherQuery } = route.query
+      router.replace({ query: otherQuery })
+    }
+  }, 20)
 }
 
 // ========== 滑动逻辑 ==========
@@ -283,6 +286,7 @@ const startY = ref(0)
 const currentX = ref(0)
 const currentY = ref(0)
 const gestureDirection = ref('')
+const dismissOffset = ref(0)
 
 const trackStyle = computed(() => {
   // 初始位置是 -100%（显示中间的 current）
@@ -294,6 +298,11 @@ const trackStyle = computed(() => {
   }
 })
 
+const dismissStyle = computed(() => ({
+  transform: `translateY(${dismissOffset.value}%)`,
+  transition: isDragging.value ? 'none' : 'transform 0.25s ease-out'
+}))
+
 function resetSwipeState() {
   trackOffset.value = 0
   isDragging.value = false
@@ -304,6 +313,7 @@ function resetSwipeState() {
   currentX.value = 0
   currentY.value = 0
   gestureDirection.value = ''
+  dismissOffset.value = 0
 }
 
 function handleTouchStart(e) {
@@ -329,6 +339,10 @@ function handleTouchMove(e) {
     gestureDirection.value = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical'
   }
   if (e.cancelable) e.preventDefault()
+  if (gestureDirection.value === 'vertical') {
+    dismissOffset.value = Math.max(0, deltaY / e.currentTarget.offsetHeight * 100)
+    return
+  }
   if (gestureDirection.value !== 'horizontal') return
 
   // 计算百分比偏移
@@ -356,8 +370,11 @@ function handleTouchEnd(e) {
 
   if (isZoomed.value) return
   if (gestureDirection.value === 'vertical') {
-    if (deltaY > wrapperHeight * 0.3) close()
-    resetSwipeState()
+    if (deltaY > wrapperHeight * 0.3) {
+      close()
+    } else {
+      resetSwipeState()
+    }
     return
   }
   if (gestureDirection.value !== 'horizontal') {

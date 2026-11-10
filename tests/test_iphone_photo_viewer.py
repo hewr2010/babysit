@@ -1,7 +1,7 @@
 from playwright.sync_api import sync_playwright
 
 
-def swipe(page, start, end, steps=8):
+def swipe(page, start, end, steps=8, wait=450):
     client = page.context.new_cdp_session(page)
     client.send("Input.dispatchTouchEvent", {
         "type": "touchStart",
@@ -15,7 +15,7 @@ def swipe(page, start, end, steps=8):
             "touchPoints": [{"x": x, "y": y, "id": 1}],
         })
     client.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
-    page.wait_for_timeout(450)
+    page.wait_for_timeout(wait)
 
 
 def pinch(page, center, start_distance, end_distance, steps=6):
@@ -115,9 +115,13 @@ def test_iphone_photo_viewer():
         media.dblclick()
         page.wait_for_timeout(250)
         assert page.locator(".slide-content.is-zoomed").count() == 0, "双击未还原"
-        swipe(page, (195, 250), (195, 700))
-        assert page.locator(".viewer-overlay").count() == 0, "还原后下滑未关闭"
-        print("还原后下滑关闭通过")
+        swipe(page, (195, 250), (195, 700), wait=0)
+        overlay = page.locator(".viewer-overlay")
+        page.wait_for_timeout(30)
+        assert "translateY(100%)" in overlay.get_attribute("style"), "关闭动画不是向下退出"
+        page.wait_for_timeout(400)
+        assert overlay.count() == 0, "还原后下滑未关闭"
+        print("还原后向下退出动画通过")
         context.close()
 
         desktop = browser.new_context(viewport={"width": 1440, "height": 1000}, service_workers="block")
