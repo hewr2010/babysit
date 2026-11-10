@@ -8,7 +8,7 @@ from pathlib import Path
 import requests
 
 from .baidu_sync import BaiduImageClient, BaiduPCSClient
-from .face_matcher import InsightFaceMatcher
+from .face_matcher import CROP_AUTO_THRESHOLD, InsightFaceMatcher
 from .notifier import BarkNotifier
 from .photo_sync_config import PhotoSyncConfig
 from .photo_sync_db import HANDLED_STATUSES, PhotoSyncStore
@@ -143,17 +143,20 @@ class PhotoSyncService:
                 if match.best_frame_path:
                     thumbnail_path = Path(match.best_frame_path)
             else:
-                match = self.matcher.match(thumbnail_path.read_bytes())
+                match = self.matcher.match_with_crops(thumbnail_path)
             if match.score is None or match.score < self.config.review_threshold:
                 self.store.set_match(
                     fs_id, "rejected", match.score, match.face_count, thumbnail_path
                 )
                 return "rejected"
-            status = (
-                "review"
-                if dry_run or match.score < self.config.auto_threshold
-                else "matched"
+            is_crop_match = (
+                match.best_frame_path
+                and match.best_frame_path != str(self.config.cache_dir / f"{fs_id}.jpg")
             )
+            should_auto = match.score >= self.config.auto_threshold or (
+                is_crop_match and match.score >= CROP_AUTO_THRESHOLD
+            )
+            status = "review" if dry_run or not should_auto else "matched"
             self.store.set_match(
                 fs_id, status, match.score, match.face_count, thumbnail_path
             )

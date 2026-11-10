@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PIL import Image
 
+CROP_AUTO_THRESHOLD = 0.50
+
 
 @dataclass(frozen=True)
 class FaceMatch:
@@ -25,6 +27,11 @@ class InsightFaceMatcher:
         self.reference_dir = Path(reference_dir)
         self.model_name = model_name
         self.model_dir = Path(model_dir) if model_dir else None
+        self.crop_dir = (
+            self.model_dir.parent / "crops"
+            if self.model_dir
+            else self.reference_dir.parent / "crops"
+        )
         self._app = None
         self._reference_embeddings = []
         self._load()
@@ -85,6 +92,52 @@ class InsightFaceMatcher:
             best_score = max(best_score, score)
         return FaceMatch(score=best_score, face_count=len(faces))
 
+    def match_with_crops(self, image_path, auto_threshold=0.54):
+        image_path = Path(image_path)
+        full_match = self.match(image_path.read_bytes())
+        if full_match.score is not None and full_match.score >= auto_threshold:
+            return VideoFaceMatch(
+                score=full_match.score,
+                face_count=full_match.face_count,
+                supporting_frames=1,
+                frame_count=1,
+                best_frame_path=str(image_path),
+            )
+
+        with Image.open(image_path) as source:
+            source = source.convert("RGB")
+            width, height = source.size
+            best_score = full_match.score
+            best_face_count = full_match.face_count
+            best_frame_path = str(image_path)
+            for index, (x0, y0) in enumerate(((0, 0), (0.4, 0), (0, 0.4), (0.4, 0.4))):
+                crop = source.crop(
+                    (
+                        int(width * x0),
+                        int(height * y0),
+                        int(width * (x0 + 0.6)),
+                        int(height * (y0 + 0.6)),
+                    )
+                )
+                crop = crop.resize((crop.width * 2, crop.height * 2))
+                self.crop_dir.mkdir(parents=True, exist_ok=True)
+                crop_path = self.crop_dir / f"{image_path.stem}-grid-{index}.jpg"
+                crop.save(crop_path, quality=92)
+                match = self.match(crop_path.read_bytes())
+                if match.score is not None and (
+                    best_score is None or match.score > best_score
+                ):
+                    best_score = match.score
+                    best_face_count = match.face_count
+                    best_frame_path = str(crop_path)
+        return VideoFaceMatch(
+            score=best_score,
+            face_count=best_face_count,
+            supporting_frames=1 if best_score is not None else 0,
+            frame_count=5,
+            best_frame_path=best_frame_path,
+        )
+
     def match_frames(self, frame_paths, support_threshold=0.35):
         best_score = None
         best_frame_path = None
@@ -92,7 +145,7 @@ class InsightFaceMatcher:
         supporting_frames = 0
         frame_paths = list(frame_paths)
         for path in frame_paths:
-            match = self.match(Path(path).read_bytes())
+            match = self.match_with_crops(path)
             max_faces = max(max_faces, match.face_count)
             if match.score is None:
                 continue

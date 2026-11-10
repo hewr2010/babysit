@@ -4,6 +4,8 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from PIL import Image
+
 from babysit.face_matcher import FaceMatch, InsightFaceMatcher
 from babysit.video_frames import VideoFrameExtractor
 
@@ -11,14 +13,26 @@ from babysit.video_frames import VideoFrameExtractor
 class MatchFramesTests(unittest.TestCase):
     def test_best_frame_and_supporting_frames(self):
         matcher = InsightFaceMatcher.__new__(InsightFaceMatcher)
-        scores = {"a": 0.2, "b": 0.7, "c": 0.4, "d": None}
-        matcher.match = lambda image: FaceMatch(scores[image.decode()], 1)
+        score_sets = [
+            [0.2, None, None, None, None],
+            [0.7],
+            [0.4, None, None, None, None],
+            [None, None, None, None, None],
+        ]
         with tempfile.TemporaryDirectory() as directory:
+            matcher.crop_dir = Path(directory) / "crops"
             paths = []
-            for name in scores:
-                path = Path(directory) / f"{name}.jpg"
-                path.write_bytes(name.encode())
+            for index in range(len(score_sets)):
+                path = Path(directory) / f"{index}.jpg"
+                Image.new("RGB", (100, 100), "white").save(path)
                 paths.append(path)
+            scores = iter(score for score_set in score_sets for score in score_set)
+
+            def match(image_bytes):
+                score = next(scores)
+                return FaceMatch(score, 1 if score is not None else 0)
+
+            matcher.match = match
             result = matcher.match_frames(paths)
 
         self.assertEqual(result.score, 0.7)
@@ -30,8 +44,9 @@ class MatchFramesTests(unittest.TestCase):
         matcher = InsightFaceMatcher.__new__(InsightFaceMatcher)
         matcher.match = lambda image: FaceMatch(None, 0)
         with tempfile.TemporaryDirectory() as directory:
+            matcher.crop_dir = Path(directory) / "crops"
             path = Path(directory) / "a.jpg"
-            path.write_bytes(b"a")
+            Image.new("RGB", (100, 100), "white").save(path)
             result = matcher.match_frames([path])
         self.assertIsNone(result.score)
         self.assertIsNone(result.best_frame_path)

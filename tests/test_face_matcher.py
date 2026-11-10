@@ -36,6 +36,27 @@ class ReferencePhotoTests(unittest.TestCase):
 
         self.assertEqual(len(matcher._reference_embeddings), 1)
 
+    def test_grid_crop_can_find_smaller_face(self):
+        from babysit.face_matcher import FaceMatch
+
+        matcher = InsightFaceMatcher.__new__(InsightFaceMatcher)
+        with tempfile.TemporaryDirectory() as directory:
+            matcher.crop_dir = Path(directory) / "crops"
+            image_path = Path(directory) / "source.jpg"
+            Image.new("RGB", (100, 100), "white").save(image_path)
+            scores = iter([None, None, 0.5007, None, None])
+
+            def match(image_bytes):
+                score = next(scores)
+                return FaceMatch(score, 1 if score is not None else 0)
+
+            matcher.match = match
+            result = matcher.match_with_crops(image_path)
+
+        self.assertEqual(result.score, 0.5007)
+        self.assertIn("grid-1", result.best_frame_path)
+        self.assertEqual(result.frame_count, 5)
+
 
 if __name__ == "__main__":
     unittest.main()

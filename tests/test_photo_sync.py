@@ -55,6 +55,17 @@ class FakeMatcher:
         score = self.scores[image_bytes.decode()]
         return FaceMatch(score=score, face_count=0 if score is None else 1)
 
+    def match_with_crops(self, image_path):
+        image_path = Path(image_path)
+        match = self.match(image_path.read_bytes())
+        return VideoFaceMatch(
+            score=match.score,
+            face_count=match.face_count,
+            supporting_frames=int(match.score is not None and match.score >= 0.35),
+            frame_count=5,
+            best_frame_path=str(image_path) if match.score is not None else None,
+        )
+
     def match_frames(self, frame_paths):
         frame_path = Path(frame_paths[0])
         match = self.match(frame_path.read_bytes())
@@ -176,6 +187,21 @@ class PhotoSyncTestCase(unittest.TestCase):
         service._video_extractor = extractor
         self.assertEqual(service.sync()["copied"], 1)
         self.assertTrue(extractor.called)
+        self.assertEqual(store.get(1)["status"], "copied")
+
+    def test_crop_match_uses_lower_crop_threshold(self):
+        from babysit.face_matcher import VideoFaceMatch
+
+        service, store, _, _ = self.service([[photo(1)]], {"1": 0.45})
+        service._matcher.match_with_crops = lambda path: VideoFaceMatch(
+            score=0.5007,
+            face_count=1,
+            supporting_frames=1,
+            frame_count=5,
+            best_frame_path="/tmp/grid-1.jpg",
+        )
+
+        self.assertEqual(service.sync()["copied"], 1)
         self.assertEqual(store.get(1)["status"], "copied")
 
     def test_review_is_archived_and_notified_only_once(self):

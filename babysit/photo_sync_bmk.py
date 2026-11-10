@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .baidu_sync import BaiduPCSClient
 from .config import DATA_DIR
-from .face_matcher import InsightFaceMatcher
+from .face_matcher import CROP_AUTO_THRESHOLD, InsightFaceMatcher
 from .video_frames import VIDEO_EXTENSIONS, VideoFrameExtractor
 
 
@@ -32,10 +32,13 @@ def evaluate(args):
             thumbnail_path = match.best_frame_path
         else:
             thumbnail_path = str(DATA_DIR / "photo_sync" / "thumbnails" / f"{fs_id}.jpg")
-            match = matcher.match(Path(thumbnail_path).read_bytes())
+            match = matcher.match_with_crops(thumbnail_path)
+        is_crop_match = match.best_frame_path != thumbnail_path
         if match.score is None:
             prediction = "rejected"
-        elif match.score >= args.auto_threshold:
+        elif match.score >= args.auto_threshold or (
+            is_crop_match and match.score >= CROP_AUTO_THRESHOLD
+        ):
             prediction = "copied"
         elif match.score >= args.review_threshold:
             prediction = "review"
