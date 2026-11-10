@@ -8,35 +8,31 @@
         <view v-if="current" class="viewer-mark" @click="editorVisible = true">标记</view>
       </view>
     </view>
-    <swiper v-if="current" class="viewer-swiper" :current="currentIndex" @change="changeMedia">
-      <swiper-item v-for="(item, index) in store.media" :key="item.name" class="viewer-item">
-        <movable-area v-if="item.type !== 'video'" class="viewer-media zoom-area" scale-area>
-          <movable-view
-            class="zoom-view"
-            direction="all"
-            scale
-            :scale-value="zoomValue"
-            :scale-min="1"
-            :scale-max="4"
-            @scale="onScale"
-          >
-            <image class="viewer-media" :src="previewUrl(item.name)" mode="aspectFit" />
-          </movable-view>
-        </movable-area>
+    <movable-area v-if="current" :key="`${current.name}-${zoomResetKey}`" class="viewer-media zoom-area" scale-area>
+      <movable-view
+        class="zoom-view"
+        direction="all"
+        scale
+        :scale-value="1"
+        :scale-min="1"
+        :scale-max="4"
+        @scale="onScale"
+      >
+        <image v-if="current.type !== 'video'" class="viewer-media" :src="previewUrl(current.name)" mode="aspectFit" />
         <video
-          v-else-if="index === currentIndex"
-          :id="`media-video-${index}`"
+          v-else
+          :id="`media-video-${currentIndex}`"
           class="viewer-media viewer-video"
-          :src="videoUrl(item)"
-          :poster="thumbUrl(item.name)"
+          :src="videoUrl(current)"
+          :poster="thumbUrl(current.name)"
           object-fit="contain"
           controls
           autoplay
           loop
           @error="videoError = '视频加载失败，请稍后重试'"
         />
-      </swiper-item>
-    </swiper>
+      </movable-view>
+    </movable-area>
     <view v-else class="viewer-empty">{{ loadError || (loading ? '正在加载分享内容…' : '没有可预览的媒体') }}</view>
     <view v-if="current" class="viewer-footer">
       <view class="viewer-meta">
@@ -63,13 +59,14 @@ const store = useAppStore()
 const currentIndex = ref(0)
 const statusBarHeight = ref(20)
 const headerRightPadding = ref(24)
-const zoomValue = ref(1)
+const zoomResetKey = ref(0)
 const saving = ref(false)
 const editorVisible = ref(false)
 const videoError = ref('')
 const loading = ref(false)
 const loadError = ref('')
 const current = computed(() => store.media[currentIndex.value])
+let zoomScale = 1
 let gestureStart = null
 
 onLoad(async options => {
@@ -137,20 +134,22 @@ function stopCurrentVideo() {
   uni.createVideoContext(`media-video-${currentIndex.value}`).stop()
 }
 
-function changeMedia(event) {
+function changeMedia(index) {
+  if (index < 0 || index >= store.media.length || index === currentIndex.value) return
   stopCurrentVideo()
-  currentIndex.value = event.detail.current
+  currentIndex.value = index
   videoError.value = ''
-  zoomValue.value = 1
+  zoomScale = 1
+  zoomResetKey.value += 1
   resetGesture()
 }
 
 function onScale(event) {
-  zoomValue.value = event.detail.scale
+  zoomScale = event.detail.scale
 }
 
 function onTouchStart(event) {
-  if (!event.touches || event.touches.length !== 1 || zoomValue.value > 1.05) {
+  if (!event.touches || event.touches.length !== 1 || zoomScale > 1.05) {
     resetGesture()
     return
   }
@@ -162,7 +161,13 @@ function onTouchEnd(event) {
   const deltaX = event.changedTouches[0].clientX - gestureStart.x
   const deltaY = event.changedTouches[0].clientY - gestureStart.y
   resetGesture()
-  if (deltaY > 80 && deltaY > Math.abs(deltaX) * 1.2) goBack()
+  if (deltaY > 80 && deltaY > Math.abs(deltaX) * 1.2) {
+    goBack()
+    return
+  }
+  if (Math.abs(deltaX) > 60 && Math.abs(deltaX) > Math.abs(deltaY) * 1.2) {
+    changeMedia(currentIndex.value + (deltaX < 0 ? 1 : -1))
+  }
 }
 
 function resetGesture() {
@@ -233,15 +238,14 @@ async function save() {
   line-height: 56rpx;
 }
 
-.viewer-swiper,
-.viewer-item {
-  flex: 1;
-  min-height: 0;
-}
-
 .viewer-media {
   width: 100%;
   height: 100%;
+}
+
+.zoom-area {
+  flex: 1;
+  min-height: 0;
 }
 
 .zoom-area,
