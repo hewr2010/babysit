@@ -1,3 +1,11 @@
+export function decodeMediaName(value) {
+  try {
+    return decodeURIComponent(value || '')
+  } catch (error) {
+    return value || ''
+  }
+}
+
 export function mediaSharePath(item) {
   const query = [`media=${encodeURIComponent(item.name)}`]
   const [year, month] = (item.date || '').split('-')

@@ -57,3 +57,4 @@ npm run build:mp-weixin
 - 组件内旧版 canvas 必须向 `uni.createCanvasContext` 传入组件实例。
 - WXSS 不使用 `*` 通配符，不混用不兼容的 `calc()` 单位。
 - 自动化清理 storage 使用 `wx.clearStorageSync()`。
+- 微信 `onLoad` 查询参数可能仍是 URL 编码，媒体文件名比较前必须安全解码；H5 与微信行为不同，分享测试需覆盖 `%20` 和非首项。

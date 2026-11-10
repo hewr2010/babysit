@@ -100,13 +100,13 @@ def main():
                 shared_page = browser.new_page()
                 shared_page.on("pageerror", lambda error: errors.append(str(error)))
                 base_url = page.url.split("#")[0]
-                media = urllib.parse.quote("第一张照片.jpg", safe="")
+                media = urllib.parse.quote("第三张照片.jpg", safe="")
                 shared_page.goto(f"{base_url}#/pages/viewer/viewer?media={media}&year={now.year}&month={now.month}")
                 expect(shared_page.locator(".auth-card")).to_be_visible(timeout=10000)
                 shared_page.locator(".auth-input input").fill("何与青")
                 shared_page.locator(".auth-button").click()
                 expect(shared_page.locator(".viewer-page")).to_be_visible(timeout=15000)
-                expect(shared_page.locator(".viewer-name")).to_have_text("第一张照片.jpg")
+                expect(shared_page.locator(".viewer-name")).to_have_text("第三张照片.jpg")
                 browser.close()
                 if errors:
                     raise AssertionError("Browser errors:\n" + "\n".join(errors))

@@ -57,7 +57,7 @@ import MilestoneEditor from '@/components/MilestoneEditor.vue'
 import { AUTH_KEY } from '@/config'
 import { previewUrl, saveToAlbum, thumbUrl, videoUrl } from '@/services/media'
 import { useAppStore } from '@/stores/app'
-import { mediaSharePath } from '@/utils/share'
+import { decodeMediaName, mediaSharePath } from '@/utils/share'
 
 const store = useAppStore()
 const currentIndex = ref(0)
@@ -117,14 +117,15 @@ async function openSharedMedia(options) {
   loading.value = true
   loadError.value = ''
   try {
-    let index = store.media.findIndex(item => item.name === options.media)
+    const mediaName = decodeMediaName(options.media)
+    let index = store.media.findIndex(item => item.name === mediaName)
     const year = Number(options.year)
     const month = Number(options.month)
     if (index < 0 && Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12) {
       store.year = year
       store.month = month
       await store.loadAlbum()
-      index = store.media.findIndex(item => item.name === options.media)
+      index = store.media.findIndex(item => item.name === mediaName)
     }
     if (index < 0) {
       loadError.value = '分享的内容不存在或尚未同步'
