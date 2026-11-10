@@ -21,3 +21,8 @@ export function albumMonths(groups) {
 export function latestByMetric(records, type) {
   return records.find(record => record.metric_type === type) || null
 }
+
+export function previewWindow(media, index, limit = 50) {
+  const start = Math.max(0, Math.min(index - Math.floor(limit / 2), media.length - limit))
+  return { start, items: media.slice(start, start + limit) }
+}

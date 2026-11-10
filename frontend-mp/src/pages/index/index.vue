@@ -28,6 +28,7 @@ import GrowthSection from '@/components/GrowthSection.vue'
 import MilestoneSection from '@/components/MilestoneSection.vue'
 import NativeTabBar from '@/components/NativeTabBar.vue'
 import { useAppStore } from '@/stores/app'
+import { nativePreviewOptions } from '@/services/media'
 
 const store = useAppStore()
 const loading = ref(true)
@@ -72,6 +73,13 @@ function showRecordOptions() {
 }
 
 function openMedia(index) {
+  // #ifdef MP-WEIXIN
+  uni.previewMedia({
+    ...nativePreviewOptions(store.media, index),
+    fail: () => uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
+  })
+  return
+  // #endif
   uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
 }
 

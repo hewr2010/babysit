@@ -14,6 +14,7 @@
           <movable-view
             class="zoom-view"
             :direction="interactionLocked ? 'all' : 'none'"
+            :disabled="!interactionLocked"
             scale
             :scale-value="1"
             :scale-min="1"
@@ -230,7 +231,9 @@ function dismiss() {
     opacity: 0,
     transition: 'transform 200ms ease-in, opacity 200ms ease-in'
   }
-  setTimeout(goBack, 200)
+  setTimeout(() => {
+    uni.reLaunch({ url: '/pages/index/index' })
+  }, 200)
 }
 
 function goBack() {

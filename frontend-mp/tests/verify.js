@@ -127,13 +127,20 @@ async function main() {
     await (await page.$('.next-month')).tap()
     await waitFor(async () => (await elementText(page, '.month-label')).includes(`${mock.current.year}年${mock.current.month}月`), 'current month')
 
+    await miniProgram.evaluate(() => {
+      wx.previewMedia = options => {
+        wx.__nativePreviewOptions = options
+        options.success?.()
+      }
+    })
     await (await page.$('.media-cell')).tap()
-    await waitFor(async () => (await miniProgram.currentPage()).path === 'pages/viewer/viewer', 'photo viewer')
-    assert.ok(await (await miniProgram.currentPage()).$('.viewer-share'))
+    const nativePreview = await miniProgram.evaluate(() => wx.__nativePreviewOptions)
+    assert.equal(nativePreview.current, 0)
+    assert.equal(nativePreview.sources.length, 8)
+    assert.equal(nativePreview.sources[0].type, 'image')
+    assert.ok(nativePreview.sources[0].url.includes('/preview/'))
     await sleep(800)
     await screenshot(miniProgram, '03-photo-viewer')
-    await miniProgram.navigateBack()
-    await sleep(500)
 
     page = await miniProgram.currentPage()
     await (await page.$('.manage-milestones')).tap()

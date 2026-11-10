@@ -1,4 +1,5 @@
 import { API_HOST, MAX_DOWNLOAD_SIZE } from '@/config'
+import { previewWindow } from '@/utils/album'
 
 function encoded(filename) {
   return encodeURIComponent(filename)
@@ -15,6 +16,18 @@ export function previewUrl(filename) {
 export function videoUrl(item) {
   const route = item.name.toLowerCase().endsWith('.livp') ? 'livp' : 'video'
   return `${API_HOST}/${route}/${encoded(item.name)}`
+}
+
+export function nativePreviewOptions(media, index) {
+  const { start, items } = previewWindow(media, index)
+  return {
+    current: index - start,
+    sources: items.map(item => ({
+      url: item.type === 'video' ? videoUrl(item) : previewUrl(item.name),
+      poster: thumbUrl(item.name),
+      type: item.type === 'video' ? 'video' : 'image'
+    }))
+  }
 }
 
 function download(url) {

@@ -27,6 +27,10 @@ async function run() {
   assert.equal(flattened[2].date, '2024-02-01')
   assert.deepEqual(album.albumMonths({ '2024-03-01': [], invalid: [], '2024-02-01': [] }).map(item => item.key), ['2024-03', '2024-02'])
   assert.equal(album.latestByMetric([{ metric_type: 'height', value: 52 }, { metric_type: 'height', value: 50 }], 'height').value, 52)
+  const previewItems = Array.from({ length: 80 }, (_, index) => ({ name: `${index}.jpg` }))
+  assert.deepEqual(album.previewWindow(previewItems, 0), { start: 0, items: previewItems.slice(0, 50) })
+  assert.deepEqual(album.previewWindow(previewItems, 60), { start: 30, items: previewItems.slice(30, 80) })
+  assert.deepEqual(album.previewWindow(previewItems, 40), { start: 15, items: previewItems.slice(15, 65) })
 
   const share = await importSource('../src/utils/share.js')
   const [shareRoute, shareQuery] = share.mediaSharePath({ name: '照片 1#.jpg', date: '2026-11-08' }).split('?')
