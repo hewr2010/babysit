@@ -1,7 +1,10 @@
 <template>
   <view class="card album-section">
     <view class="section-heading">
-      <text class="section-title">{{ store.selectedMonthLabel }}相册</text>
+      <view class="album-heading-copy">
+        <text class="section-title">{{ store.selectedMonthLabel }}相册</text>
+        <text class="album-hint">长按照片可标记 / 转发</text>
+      </view>
       <text class="album-count">{{ store.albumLoading ? '加载中…' : `${store.media.length} 项` }}</text>
     </view>
     <view v-if="!store.media.length && !store.albumLoading" class="empty-state">这个月还没有照片或视频</view>
@@ -11,9 +14,10 @@
         <text class="day-count">{{ group.items.length }} 项</text>
       </view>
       <view class="media-grid">
-        <view v-for="item in visibleItems(group)" :key="item.name" class="media-cell" @click="open(item)">
+        <view v-for="item in visibleItems(group)" :key="item.name" class="media-cell" @click="open(item)" @longpress.stop="showActions(item)">
           <image class="media-thumb" :src="thumbUrl(item.name)" mode="aspectFill" lazy-load />
           <view v-if="item.type === 'video'" class="video-badge">▶</view>
+          <view v-if="milestoneNames.has(item.name)" class="milestone-badge">⭐</view>
           <text v-if="item.time" class="media-time">{{ item.time }}</text>
         </view>
       </view>
@@ -21,25 +25,47 @@
         {{ expandedDates.has(group.date) ? '收起' : `查看更多（${group.items.length - 6} 项）` }}
       </view>
     </view>
+    <AppSheet :visible="actionVisible" title="照片 / 视频操作" @close="closeActions">
+      <view class="album-actions">
+        <button class="secondary-button action-button open-milestone-editor" @click="openEditor">
+          {{ selectedMilestones.length ? `查看重要时刻（${selectedMilestones.length}）` : '标记重要时刻' }}
+        </button>
+        <button class="secondary-button action-button action-share" open-type="share" @click="closeActions">转发小程序卡片</button>
+        <button class="secondary-button action-button" :disabled="saving" @click="saveCurrent">{{ saving ? '保存中…' : '保存原文件' }}</button>
+      </view>
+    </AppSheet>
+    <MilestoneEditor :visible="editorVisible" :media="selectedMedia" @close="editorVisible = false" />
   </view>
 </template>
 
 <script setup>
 import { computed, ref, watch } from 'vue'
+import AppSheet from '@/components/AppSheet.vue'
+import MilestoneEditor from '@/components/MilestoneEditor.vue'
+import { saveToAlbum, thumbUrl } from '@/services/media'
 import { useAppStore } from '@/stores/app'
-import { thumbUrl } from '@/services/media'
 import { shortDate } from '@/utils/date'
 
-const emit = defineEmits(['open'])
+const emit = defineEmits(['open', 'actions'])
 const store = useAppStore()
 const expandedDates = ref(new Set())
+const actionVisible = ref(false)
+const editorVisible = ref(false)
+const selectedMedia = ref(null)
+const saving = ref(false)
+let suppressClick = false
 const groups = computed(() => Object.keys(store.albumByDate).sort().reverse().map(date => ({
   date,
   items: [...store.albumByDate[date]].sort((a, b) => (b.time || '').localeCompare(a.time || ''))
 })))
+const milestoneNames = computed(() => new Set(store.milestones.map(item => item.media_filename)))
+const selectedMilestones = computed(() => selectedMedia.value
+  ? store.milestones.filter(item => item.media_filename === selectedMedia.value.name)
+  : [])
 
 watch(() => store.selectedMonthKey, () => {
   expandedDates.value = new Set()
+  actionVisible.value = false
 })
 
 function visibleItems(group) {
@@ -54,8 +80,41 @@ function toggleDate(date) {
 }
 
 function open(item) {
+  if (suppressClick) return
   const index = store.media.findIndex(mediaItem => mediaItem.name === item.name)
   if (index >= 0) emit('open', index)
+}
+
+function showActions(item) {
+  suppressClick = true
+  selectedMedia.value = item
+  actionVisible.value = true
+  emit('actions', item)
+  setTimeout(() => { suppressClick = false }, 500)
+}
+
+function closeActions() {
+  suppressClick = false
+  actionVisible.value = false
+}
+
+function openEditor() {
+  closeActions()
+  editorVisible.value = true
+}
+
+async function saveCurrent() {
+  if (!selectedMedia.value || saving.value) return
+  closeActions()
+  saving.value = true
+  try {
+    await saveToAlbum(selectedMedia.value)
+    uni.showToast({ title: '已保存到相册', icon: 'success' })
+  } catch (error) {
+    uni.showModal({ title: '无法保存', content: error.message, showCancel: false })
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -139,5 +198,38 @@ function open(item) {
   color: #db2777;
   text-align: center;
   font-size: 26rpx;
+}
+
+.album-heading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.album-hint {
+  color: #9ca3af;
+  font-size: 21rpx;
+  font-weight: 400;
+}
+
+.milestone-badge {
+  position: absolute;
+  top: 8rpx;
+  right: 8rpx;
+  padding: 4rpx 8rpx;
+  border-radius: 16rpx;
+  background: rgba(236, 72, 153, 0.9);
+  font-size: 20rpx;
+  line-height: 1.2;
+}
+
+.album-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.action-button {
+  width: 100%;
 }
 </style>

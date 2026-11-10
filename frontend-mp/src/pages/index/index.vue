@@ -9,7 +9,7 @@
     <view v-else class="home-content">
       <GrowthSection id="growth-section" @add="openGrowth" />
       <MilestoneSection @open="openMilestone" />
-      <AlbumSection id="album-section" @open="openMedia" />
+      <AlbumSection id="album-section" @open="openMedia" @actions="onMediaActions" />
     </view>
     <NativeTabBar :current="currentTab" @select="scrollToSection" @record="showRecordOptions" />
     <BabyEditor :visible="babyVisible" @close="babyVisible = false" />
@@ -19,7 +19,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { onLoad } from '@dcloudio/uni-app'
+import { onLoad, onShareAppMessage } from '@dcloudio/uni-app'
 import AlbumSection from '@/components/AlbumSection.vue'
 import AppHeader from '@/components/AppHeader.vue'
 import BabyEditor from '@/components/BabyEditor.vue'
@@ -28,7 +28,8 @@ import GrowthSection from '@/components/GrowthSection.vue'
 import MilestoneSection from '@/components/MilestoneSection.vue'
 import NativeTabBar from '@/components/NativeTabBar.vue'
 import { useAppStore } from '@/stores/app'
-import { nativePreviewOptions } from '@/services/media'
+import { nativePreviewOptions, previewUrl, thumbUrl } from '@/services/media'
+import { mediaSharePath } from '@/utils/share'
 
 const store = useAppStore()
 const loading = ref(true)
@@ -37,8 +38,22 @@ const babyVisible = ref(false)
 const growthVisible = ref(false)
 const growthType = ref('height')
 const currentTab = ref('growth')
+const sharedMedia = ref(null)
+
+onShareAppMessage(() => {
+  if (!sharedMedia.value) return { title: '宝宝成长日志', path: '/pages/index/index' }
+  return {
+    title: `${store.baby?.name || '宝宝'}的${sharedMedia.value.type === 'video' ? '新视频' : '新照片'}`,
+    imageUrl: sharedMedia.value.type === 'video' ? thumbUrl(sharedMedia.value.name) : previewUrl(sharedMedia.value.name),
+    path: mediaSharePath(sharedMedia.value)
+  }
+})
 
 onLoad(initialize)
+
+function onMediaActions(item) {
+  sharedMedia.value = item
+}
 
 async function initialize() {
   loading.value = true
