@@ -92,8 +92,8 @@ class FakeNotifier:
     def __init__(self):
         self.calls = []
 
-    def notify_review(self, items, destination):
-        self.calls.append(([item["fs_id"] for item in items], destination))
+    def notify_round(self, results, pending_review):
+        self.calls.append((results, pending_review))
         return True
 
 

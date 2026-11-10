@@ -145,7 +145,7 @@ frontend/src/
 3. 并发预取缩略图，在本地用 InsightFace 逐张识别女儿，视频解包抽帧并取最佳帧
 4. 参考照片必须且只能包含一张人脸，多人合照禁止入库，避免家长特征污染
 5. 高分照片通过 BaiduPCS-Go 串行复制到 `/apps/bypy/爸妈与小宝`
-6. 灰区照片复制到 `/apps/bypy/爸妈与小宝-review` 并批量发送 Bark；手动删除或复制到正式相册后由对账更新状态
+6. 灰区照片复制到 `/apps/bypy/爸妈与小宝-review`；每轮汇总通过 `BARK_URLS` 多地址发送，手动删除或复制到正式相册后由对账更新状态
 7. backlog 每 60 秒续跑，追平后恢复常规间隔，配置见 README
 8. 使用 `python -m babysit.photo_sync daemon` 运行
 9. `daemon.log` 记录每张实际复制文件和每轮汇总，无需单独运行观察进程

@@ -97,9 +97,16 @@ class PhotoSyncService:
                 copied.append(item)
             except (OSError, RuntimeError, ValueError, requests.RequestException) as exc:
                 print(f"待确认复制失败 {item['filename']}：{exc}", flush=True)
-        if copied:
-            self.notifier.notify_review(copied, self.config.review_destination_path)
         return copied
+
+    def _pending_review_count(self):
+        counts = self.store.counts()
+        return counts.get("review", 0) + counts.get("review_copied", 0)
+
+    def _notify_round(self, results):
+        activity_keys = ("copied", "existing", "review", "rejected", "error")
+        if any(results.get(key, 0) for key in activity_keys):
+            self.notifier.notify_round(results, self._pending_review_count())
 
     def _record_error(self, fs_id, exc):
         item = self.store.set_error(fs_id, exc)
@@ -267,6 +274,8 @@ class PhotoSyncService:
                 break
         self.store.set_state("scan_backlog", "1" if limit_hit else "0")
         results["review_copied"] = 0 if dry_run else len(self.sync_reviews())
+        if not dry_run:
+            self._notify_round(results)
         return results
 
     def approve(self, fs_id):
@@ -455,6 +464,9 @@ def main(argv=None):
             print(f"已重新排队 {count} 个文件")
         elif args.command == "sync-reviews":
             copied = service.sync_reviews()
+            if copied:
+                results = {"copied": 0, "existing": 0, "review_copied": len(copied)}
+                service.notifier.notify_round(results, service._pending_review_count())
             print(f"已归档 {len(copied)} 个待确认文件")
         elif args.command == "doctor":
             result = service.doctor()
