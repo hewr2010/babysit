@@ -1,7 +1,11 @@
 <template>
   <view class="native-tab-bar">
     <view class="tab-item growth-tab" :class="{ active: current === 'growth' }" @click="emit('select', 'growth')">
-      <text class="tab-icon">▥</text>
+      <view class="tab-icon chart-icon">
+        <view class="chart-bar chart-bar-short" />
+        <view class="chart-bar chart-bar-medium" />
+        <view class="chart-bar chart-bar-tall" />
+      </view>
       <text>成长曲线</text>
     </view>
     <view class="record-tab" @click="emit('record')">
@@ -9,7 +13,11 @@
       <text>记录</text>
     </view>
     <view class="tab-item album-tab" :class="{ active: current === 'album' }" @click="emit('select', 'album')">
-      <text class="tab-icon">▦</text>
+      <view class="tab-icon album-icon">
+        <view class="album-sun" />
+        <view class="album-mountain album-mountain-large" />
+        <view class="album-mountain album-mountain-small" />
+      </view>
       <text>相册</text>
     </view>
   </view>
@@ -52,9 +60,75 @@ const emit = defineEmits(['select', 'record'])
 }
 
 .tab-icon {
+  box-sizing: border-box;
   height: 48rpx;
-  line-height: 48rpx;
-  font-size: 36rpx;
+  color: inherit;
+}
+
+.chart-icon {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 6rpx;
+  padding-bottom: 6rpx;
+}
+
+.chart-bar {
+  width: 6rpx;
+  border-radius: 3rpx;
+  background: currentColor;
+}
+
+.chart-bar-short {
+  height: 16rpx;
+}
+
+.chart-bar-medium {
+  height: 26rpx;
+}
+
+.chart-bar-tall {
+  height: 36rpx;
+}
+
+.album-icon {
+  position: relative;
+  width: 42rpx;
+  height: 36rpx;
+  margin-top: 4rpx;
+  border: 3rpx solid currentColor;
+  border-radius: 5rpx;
+}
+
+.album-sun {
+  position: absolute;
+  top: 5rpx;
+  right: 5rpx;
+  width: 6rpx;
+  height: 6rpx;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.album-mountain {
+  position: absolute;
+  bottom: 3rpx;
+  width: 0;
+  height: 0;
+  border-right: 8rpx solid transparent;
+  border-bottom: 14rpx solid currentColor;
+  border-left: 8rpx solid transparent;
+}
+
+.album-mountain-large {
+  left: 4rpx;
+}
+
+.album-mountain-small {
+  right: 4rpx;
+  border-right-width: 6rpx;
+  border-bottom-width: 10rpx;
+  border-left-width: 6rpx;
 }
 
 .record-tab {
