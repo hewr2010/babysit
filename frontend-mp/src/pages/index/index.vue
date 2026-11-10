@@ -89,13 +89,11 @@ function showRecordOptions() {
 
 function openMedia(index) {
   // #ifdef MP-WEIXIN
-  if (store.media[index]?.type !== 'video') {
-    uni.previewMedia({
-      ...nativePreviewOptions(store.media, index),
-      fail: () => uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
-    })
-    return
-  }
+  uni.previewMedia({
+    ...nativePreviewOptions(store.media, index),
+    fail: () => uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
+  })
+  return
   // #endif
   uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
 }

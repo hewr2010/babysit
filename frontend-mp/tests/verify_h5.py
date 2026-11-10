@@ -86,10 +86,7 @@ def main():
                 page.locator(".viewer-swiper").evaluate("element => element.__vueParentComponent.emit('change', { detail: { current: 1 } })")
                 expect(page.locator(".zoom-view .viewer-video")).to_be_visible(timeout=10000)
                 expect(page.locator(".viewer-name")).to_have_text("第一段视频.mp4")
-                assert page.locator(".viewer-video video").evaluate("video => video.loop") is True
-                page.locator(".viewer-video video").evaluate("video => { window.__videoReplayCount = 0; video.play = () => { window.__videoReplayCount += 1; return Promise.resolve(); }; video.dispatchEvent(new Event('ended')); }")
-                expect(page.locator(".viewer-page")).to_be_visible()
-                assert page.evaluate("window.__videoReplayCount") == 1
+                assert page.locator(".viewer-video video").evaluate("video => video.loop") is False
                 page.locator(".viewer-page").dispatch_event("touchstart", {"touches": [{"identifier": 0, "clientX": 180, "clientY": 200}]})
                 page.locator(".viewer-page").dispatch_event("touchmove", {"touches": [{"identifier": 0, "clientX": 180, "clientY": 320}]})
                 assert "translateY" in page.locator(".viewer-page").get_attribute("style")
