@@ -3,20 +3,40 @@ from pathlib import Path
 
 import requests
 
+from .config import DATA_DIR
+
 
 class BarkNotifier:
-    def __init__(self, key=None, endpoint="https://api.day.app", urls=None):
+    def __init__(self, key=None, endpoint="https://api.day.app", urls=None, urls_file=None):
         if urls:
             self.urls = list(urls)
         elif os.environ.get("BARK_URLS"):
-            self.urls = [
-                url.strip()
-                for url in os.environ["BARK_URLS"].split(",")
-                if url.strip()
-            ]
+            self.urls = self._split_urls(os.environ["BARK_URLS"])
         else:
-            key = key or os.environ.get("BARK_KEY") or self._key_from_zshrc()
-            self.urls = [f"{endpoint.rstrip('/')}/{key}"] if key else []
+            self.urls_file = Path(
+                urls_file
+                or os.environ.get(
+                    "BARK_URLS_FILE", DATA_DIR / "photo_sync" / "bark-urls.txt"
+                )
+            )
+            self.urls = self._read_urls_file()
+            if not self.urls:
+                key = key or os.environ.get("BARK_KEY") or self._key_from_zshrc()
+                self.urls = [f"{endpoint.rstrip('/')}/{key}"] if key else []
+
+    @staticmethod
+    def _split_urls(value):
+        return [url.strip() for url in value.split(",") if url.strip()]
+
+    def _read_urls_file(self):
+        if not self.urls_file.exists():
+            return []
+        values = []
+        for line in self.urls_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                values.extend(self._split_urls(line))
+        return values
 
     @staticmethod
     def _key_from_zshrc():

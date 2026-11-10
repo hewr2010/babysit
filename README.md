@@ -110,7 +110,7 @@ python -m babysit.photo_sync daemon
 export BARK_URLS="https://api.day.app/<key-1>/title/body,https://api.day.app/<key-2>/title/body"
 ```
 
-Bark URL 和 key 属于凭证，不要提交到 Git。
+Bark URL 和 key 属于凭证，不要提交到 Git。也可以把多个完整 URL 按行写入被忽略的 `babysit/data/photo_sync/bark-urls.txt`，或通过 `BARK_URLS_FILE` 指定其他文件，便于定时任务复用。
 
 手动删除灰区文件不会触发重复复制；手动复制到 `/apps/bypy/爸妈与小宝` 后，下一轮对账会标记为正式 `copied`。`approve <fs_id>` 也可将灰区文件复制到正式相册，`reject <fs_id>` 则标记为不匹配。
 

@@ -29,6 +29,19 @@ class BarkNotifierTests(unittest.TestCase):
         self.assertIn("当前待人工处理 7 个", body)
         self.assertIn("不匹配 20 个", body)
 
+    def test_urls_can_be_loaded_from_ignored_file(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "bark-urls.txt"
+            path.write_text("https://example.test/first\nhttps://example.test/second\n")
+            notifier = BarkNotifier(urls_file=path)
+        self.assertEqual(
+            notifier.urls,
+            ["https://example.test/first", "https://example.test/second"],
+        )
+
     @patch("babysit.notifier.requests.post")
     def test_empty_round_is_not_sent(self, post):
         notifier = BarkNotifier(urls=["https://example.test/only"])
