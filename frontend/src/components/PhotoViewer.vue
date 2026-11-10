@@ -8,7 +8,8 @@
         <div class="viewer-wrapper"
              @touchstart="handleTouchStart"
              @touchmove="handleTouchMove"
-             @touchend="handleTouchEnd">
+             @touchend="handleTouchEnd"
+             @touchcancel="handleTouchEnd">
           <div class="viewer-track"
                :class="{ 'is-animating': isAnimating }"
                :style="trackStyle">
@@ -27,7 +28,7 @@
                 <div class="spinner"></div>
                 <span>加载中...</span>
               </div>
-              <SlideContent v-else :photo="currentPhoto" :is-current="true" @loaded="loading = false" @error="onSlideError" />
+              <SlideContent v-else :photo="currentPhoto" :is-current="true" @loaded="loading = false" @error="onSlideError" @zoom-change="isZoomed = $event" />
             </div>
 
             <!-- 下一张 -->
@@ -124,6 +125,7 @@ const router = useRouter()
 const loading = ref(true)
 const loadError = ref('')
 const isDownloading = ref(false)
+const isZoomed = ref(false)
 const milestones = ref([])
 
 const currentIndex = computed(() => modalStore.photoViewerIndex)
@@ -277,7 +279,10 @@ const trackOffset = ref(0) // 当前偏移量（百分比）
 const isDragging = ref(false)
 const isAnimating = ref(false)
 const startX = ref(0)
+const startY = ref(0)
 const currentX = ref(0)
+const currentY = ref(0)
+const gestureDirection = ref('')
 
 const trackStyle = computed(() => {
   // 初始位置是 -100%（显示中间的 current）
@@ -285,7 +290,7 @@ const trackStyle = computed(() => {
   const totalOffset = baseOffset + trackOffset.value
   return {
     transform: `translateX(${totalOffset}%)`,
-    willChange: isDragging.value ? 'transform' : 'auto'
+    willChange: 'transform'
   }
 })
 
@@ -293,24 +298,38 @@ function resetSwipeState() {
   trackOffset.value = 0
   isDragging.value = false
   isAnimating.value = false
+  isZoomed.value = false
   startX.value = 0
+  startY.value = 0
   currentX.value = 0
+  currentY.value = 0
+  gestureDirection.value = ''
 }
 
 function handleTouchStart(e) {
-  if (store.photos.length <= 1) return
-
+  if (isZoomed.value) return
   isAnimating.value = false
   isDragging.value = true
   startX.value = e.touches[0].clientX
+  startY.value = e.touches[0].clientY
   currentX.value = startX.value
+  currentY.value = startY.value
+  gestureDirection.value = ''
 }
 
 function handleTouchMove(e) {
-  if (!isDragging.value) return
-
+  if (!isDragging.value || isZoomed.value) return
   currentX.value = e.touches[0].clientX
+  currentY.value = e.touches[0].clientY
   const deltaX = currentX.value - startX.value
+  const deltaY = currentY.value - startY.value
+
+  if (!gestureDirection.value) {
+    if (Math.max(Math.abs(deltaX), Math.abs(deltaY)) < 8) return
+    gestureDirection.value = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical'
+  }
+  if (e.cancelable) e.preventDefault()
+  if (gestureDirection.value !== 'horizontal') return
 
   // 计算百分比偏移
   const wrapperWidth = e.currentTarget.offsetWidth
@@ -328,12 +347,25 @@ function handleTouchMove(e) {
 
 function handleTouchEnd(e) {
   if (!isDragging.value) return
-
   isDragging.value = false
-  isAnimating.value = true
 
   const wrapperWidth = e.currentTarget.offsetWidth
+  const wrapperHeight = e.currentTarget.offsetHeight
   const deltaX = currentX.value - startX.value
+  const deltaY = currentY.value - startY.value
+
+  if (isZoomed.value) return
+  if (gestureDirection.value === 'vertical') {
+    if (deltaY > wrapperHeight * 0.3) close()
+    resetSwipeState()
+    return
+  }
+  if (gestureDirection.value !== 'horizontal') {
+    resetSwipeState()
+    return
+  }
+
+  isAnimating.value = true
   const deltaPercent = deltaX / wrapperWidth
 
   // 判断是否要切换
@@ -342,11 +374,9 @@ function handleTouchEnd(e) {
 
   if (Math.abs(deltaPercent) > THRESHOLD) {
     if (deltaPercent < 0 && canNext.value) {
-      // 左滑 -> 下一张
       shouldSwitch = true
       direction = -1
     } else if (deltaPercent > 0 && canPrev.value) {
-      // 右滑 -> 上一张
       shouldSwitch = true
       direction = 1
     }
@@ -409,7 +439,7 @@ function navigateNext() {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  touch-action: pan-y;
+  touch-action: none;
 }
 
 .viewer-track {
