@@ -32,6 +32,7 @@
               controls
               autoplay
               loop
+              @ended="replayVideo"
               @error="videoError = '视频加载失败，请稍后重试'"
             />
           </movable-view>
@@ -144,6 +145,11 @@ onUnload(stopCurrentVideo)
 function stopCurrentVideo() {
   if (current.value?.type !== 'video') return
   uni.createVideoContext(`media-video-${currentIndex.value}`).stop()
+}
+
+function replayVideo() {
+  if (current.value?.type !== 'video') return
+  uni.createVideoContext(`media-video-${currentIndex.value}`).play()
 }
 
 function changeMedia(event) {

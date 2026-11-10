@@ -1,10 +1,7 @@
 <template>
   <view class="card album-section">
     <view class="section-heading">
-      <view class="album-heading-copy">
-        <text class="section-title">{{ store.selectedMonthLabel }}相册</text>
-        <text class="album-hint">点 ··· 可标记 / 转发</text>
-      </view>
+      <text class="section-title">{{ store.selectedMonthLabel }}相册</text>
       <text class="album-count">{{ store.albumLoading ? '加载中…' : `${store.media.length} 项` }}</text>
     </view>
     <view v-if="!store.media.length && !store.albumLoading" class="empty-state">这个月还没有照片或视频</view>
@@ -199,18 +196,6 @@ async function saveCurrent() {
   color: #db2777;
   text-align: center;
   font-size: 26rpx;
-}
-
-.album-heading-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 6rpx;
-}
-
-.album-hint {
-  color: #9ca3af;
-  font-size: 21rpx;
-  font-weight: 400;
 }
 
 .milestone-badge {

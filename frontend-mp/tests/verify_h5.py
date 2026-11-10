@@ -66,7 +66,7 @@ def main():
                 expect(page.locator(".view-more-btn")).to_have_text("收起")
                 page.locator(".view-more-btn").click()
                 expect(page.locator(".media-cell")).to_have_count(6)
-                expect(page.locator(".album-hint")).to_be_visible()
+                expect(page.locator(".album-hint")).to_have_count(0)
                 page.locator(".media-menu-button").first.click()
                 expect(page.locator(".album-actions")).to_be_visible()
                 expect(page.locator(".action-share")).to_be_visible()
@@ -87,6 +87,9 @@ def main():
                 expect(page.locator(".zoom-view .viewer-video")).to_be_visible(timeout=10000)
                 expect(page.locator(".viewer-name")).to_have_text("第一段视频.mp4")
                 assert page.locator(".viewer-video video").evaluate("video => video.loop") is True
+                page.locator(".viewer-video video").evaluate("video => { window.__videoReplayCount = 0; video.play = () => { window.__videoReplayCount += 1; return Promise.resolve(); }; video.dispatchEvent(new Event('ended')); }")
+                expect(page.locator(".viewer-page")).to_be_visible()
+                assert page.evaluate("window.__videoReplayCount") == 1
                 page.locator(".viewer-page").dispatch_event("touchstart", {"touches": [{"identifier": 0, "clientX": 180, "clientY": 200}]})
                 page.locator(".viewer-page").dispatch_event("touchmove", {"touches": [{"identifier": 0, "clientX": 180, "clientY": 320}]})
                 assert "translateY" in page.locator(".viewer-page").get_attribute("style")
