@@ -7,8 +7,8 @@
       </picker>
     </view>
     <view class="field">
-      <text class="field-label">{{ type === 'height' ? '身高（cm）' : '体重（g）' }}</text>
-      <input v-model="value" class="field-input growth-value-input" type="digit" :placeholder="type === 'height' ? '例如 52.5' : '例如 3500'" />
+      <text class="field-label">{{ type === 'height' ? '身高（cm）' : '体重（kg）' }}</text>
+      <input v-model="value" class="field-input growth-value-input" type="digit" :placeholder="type === 'height' ? '例如 52.5' : '例如 4.2'" />
     </view>
     <button class="primary-button save-growth" :disabled="saving" @click="save">{{ saving ? '保存中…' : '保存记录' }}</button>
   </AppSheet>
@@ -19,6 +19,7 @@ import { ref, watch } from 'vue'
 import AppSheet from '@/components/AppSheet.vue'
 import { useAppStore } from '@/stores/app'
 import { today } from '@/utils/date'
+import { kilogramsToGrams } from '@/utils/growth'
 
 const props = defineProps({
   visible: Boolean,
@@ -39,13 +40,14 @@ watch(() => props.visible, visible => {
 
 async function save() {
   const number = Number(value.value)
-  if (!Number.isFinite(number) || number <= 0 || (props.type === 'weight' && !Number.isInteger(number))) {
-    uni.showToast({ title: props.type === 'height' ? '请输入有效身高' : '请输入正整数克数', icon: 'none' })
+  if (!Number.isFinite(number) || number <= 0) {
+    uni.showToast({ title: props.type === 'height' ? '请输入有效身高' : '请输入有效体重（kg）', icon: 'none' })
     return
   }
   saving.value = true
   try {
-    await store.addGrowth({ date: date.value, [props.type]: number })
+    const value = props.type === 'weight' ? kilogramsToGrams(number) : number
+    await store.addGrowth({ date: date.value, [props.type]: value })
     emit('close')
     uni.showToast({ title: '记录已保存', icon: 'success' })
   } catch (error) {

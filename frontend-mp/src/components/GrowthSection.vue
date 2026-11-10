@@ -10,7 +10,7 @@
         <text class="metric-value">{{ item.value }} <text class="metric-unit">{{ item.unit }}</text></text>
       </view>
     </view>
-    <GrowthChart v-if="filteredRecords.length" :records="filteredRecords" :metric="metric" />
+    <GrowthChart v-if="chartRecords.length" :records="chartRecords" :metric="metric" />
     <view v-else class="empty-state">还没有{{ metric === 'height' ? '身高' : '体重' }}记录</view>
   </view>
 </template>
@@ -20,14 +20,20 @@ import { computed, ref } from 'vue'
 import GrowthChart from '@/components/GrowthChart.vue'
 import { useAppStore } from '@/stores/app'
 import { latestByMetric } from '@/utils/album'
+import { formatKilograms, gramsToKilograms } from '@/utils/growth'
 
 const emit = defineEmits(['add'])
 const store = useAppStore()
 const metric = ref('height')
 const filteredRecords = computed(() => store.growthRecords.filter(record => record.metric_type === metric.value))
+const chartRecords = computed(() => filteredRecords.value.map(record => ({
+  ...record,
+  value: metric.value === 'weight' ? gramsToKilograms(record.value) : record.value
+})))
+const latestWeight = computed(() => latestByMetric(store.growthRecords, 'weight'))
 const summaries = computed(() => [
   { type: 'height', label: '最新身高', unit: 'cm', value: latestByMetric(store.growthRecords, 'height')?.value ?? '—' },
-  { type: 'weight', label: '最新体重', unit: 'g', value: latestByMetric(store.growthRecords, 'weight')?.value ?? '—' }
+  { type: 'weight', label: '最新体重', unit: 'kg', value: latestWeight.value ? formatKilograms(latestWeight.value.value) : '—' }
 ])
 </script>
 

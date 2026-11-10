@@ -42,7 +42,14 @@ async function run() {
   assert.equal(share.decodeMediaName('2026-11-10%20093849_test.livp'), '2026-11-10 093849_test.livp')
   assert.equal(share.decodeMediaName('已经解码.jpg'), '已经解码.jpg')
   assert.equal(share.decodeMediaName('100%.jpg'), '100%.jpg')
-  console.log('Unit tests passed: dates, album helpers and media share paths.')
+
+  const growth = await importSource('../src/utils/growth.js')
+  assert.equal(growth.kilogramsToGrams(4.2), 4200)
+  assert.equal(growth.kilogramsToGrams(4.25), 4250)
+  assert.equal(growth.gramsToKilograms(4250), 4.25)
+  assert.equal(growth.formatKilograms(4200), '4.2')
+  assert.equal(growth.formatKilograms(4000), '4')
+  console.log('Unit tests passed: dates, album helpers, media share paths and weight conversion.')
 }
 
 run().catch(error => {

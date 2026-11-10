@@ -1,7 +1,7 @@
 <template>
   <view class="growth-chart">
     <canvas id="growth-canvas" canvas-id="growth-canvas" class="chart-canvas" />
-    <view class="chart-legend">{{ metric === 'height' ? '身高 cm' : '体重 g' }}</view>
+    <view class="chart-legend">{{ metric === 'height' ? '身高 cm' : '体重 kg' }}</view>
   </view>
 </template>
 
