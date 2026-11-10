@@ -19,27 +19,39 @@ class VideoFrameExtractor:
             return existing
         frame_dir.mkdir(parents=True, exist_ok=True)
         original = self.copier.download(photo["path"], self.work_dir)
-        video_path = self._video_path(original, fs_id)
-        duration = self._duration(video_path)
-        interval = 0.5 if duration <= 4 else max(2.0, duration / self.max_frames)
-        subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-v",
-                "error",
-                "-i",
-                str(video_path),
-                "-vf",
-                f"fps=1/{interval},scale=640:-2",
-                "-q:v",
-                "3",
-                str(frame_dir / "frame-%03d.jpg"),
-            ],
-            check=True,
-            capture_output=True,
-            timeout=max(60, int(duration * 2)),
-        )
+        video_path = None
+        try:
+            video_path = self._video_path(original, fs_id)
+            duration = self._duration(video_path)
+            interval = 0.5 if duration <= 4 else max(2.0, duration / self.max_frames)
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-v",
+                    "error",
+                    "-i",
+                    str(video_path),
+                    "-vf",
+                    f"fps=1/{interval},scale=640:-2",
+                    "-q:v",
+                    "3",
+                    str(frame_dir / "frame-%03d.jpg"),
+                ],
+                check=True,
+                capture_output=True,
+                timeout=max(60, int(duration * 2)),
+            )
+        except (
+            zipfile.BadZipFile,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+            ValueError,
+        ) as exc:
+            original.unlink(missing_ok=True)
+            if video_path is not None:
+                video_path.unlink(missing_ok=True)
+            raise RuntimeError(f"视频抽帧失败：{photo['path']}：{exc}") from exc
         video_path.unlink(missing_ok=True)
         if original.suffix.lower() == ".livp":
             original.unlink(missing_ok=True)

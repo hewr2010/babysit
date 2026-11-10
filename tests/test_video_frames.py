@@ -81,6 +81,21 @@ class VideoFrameExtractorTests(unittest.TestCase):
             self.assertFalse(livp.exists())
             self.assertEqual(extractor.extract(photo), frames)
             self.assertEqual(copier.calls, 1)
+    def test_corrupt_video_is_retryable_and_deleted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            livp = root / "broken.livp"
+            livp.write_bytes(b"not a zip")
+
+            class Copier:
+                def download(self, source_path, destination_dir):
+                    return livp
+
+            extractor = VideoFrameExtractor(Copier(), root / "work")
+            photo = {"fs_id": "456", "path": "/来自：iPhone/broken.livp"}
+            with self.assertRaisesRegex(RuntimeError, "视频抽帧失败"):
+                extractor.extract(photo)
+            self.assertFalse(livp.exists())
 
 
 if __name__ == "__main__":
