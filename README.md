@@ -94,11 +94,38 @@ python -m babysit.photo_sync sync
 python -m babysit.photo_sync daemon
 ```
 
-默认每 30 分钟处理最多 50 张新照片，相似度不低于 0.55 自动复制，0.35 到 0.55 进入人工确认。可分别通过 `PHOTO_SYNC_INTERVAL`、`PHOTO_SYNC_SCAN_LIMIT`、`PHOTO_SYNC_AUTO_THRESHOLD`、`PHOTO_SYNC_REVIEW_THRESHOLD` 调整。其他配置见 `babysit/photo_sync_config.py`。
+默认每 30 分钟处理最多 50 张新照片，相似度不低于 0.54 自动复制，0.35 到 0.54 进入人工确认。可分别通过 `PHOTO_SYNC_INTERVAL`、`PHOTO_SYNC_SCAN_LIMIT`、`PHOTO_SYNC_AUTO_THRESHOLD`、`PHOTO_SYNC_REVIEW_THRESHOLD` 调整。其他配置见 `babysit/photo_sync_config.py`。
 
 每轮会先读取目标目录进行对账：同名且 MD5 一致的文件、带对应 `fs_id` 后缀的文件或 MD5 相同的文件都视为已经处理，不再运行人脸识别，也不占用每轮分析额度。两台 iPhone 产生同名但 MD5 不同的文件时不会跳过，而是添加 `fs_id` 后缀后复制。因此本地 SQLite 不是完整的处理历史也没关系，不需要读取其他环境的生产数据库。积压照片通过 `scan_backlog` 分批续跑，目标目录无法读取时会停止本轮以避免重复复制。
 
 缩略图默认使用 4 路并发预取，可通过 `PHOTO_SYNC_DOWNLOAD_WORKERS` 调整（1 到 16）。存在积压时默认每 60 秒继续下一批，可通过 `PHOTO_SYNC_BACKLOG_INTERVAL` 调整；追平后恢复 `PHOTO_SYNC_INTERVAL` 指定的常规间隔。人脸识别和云端复制仍按顺序执行，不通过拼接缩小图片来牺牲小脸识别准确率。
+
+`.livp`、`.mp4`、`.mov` 不再只分析网盘封面：同步进程会下载视频并抽帧，短视频约每 0.5 秒一帧，长视频最多覆盖 24 个时间点，使用最佳帧的人脸相似度。下载遇到 0B 或网络抖动会退避重试，抽帧结果会缓存复用。
+
+#### 识别回归 benchmark 与历史重扫
+
+私人样本和帧文件保存在被 Git 忽略的 `babysit/data/photo_sync_bmk/`，不会提交到仓库。运行回归：
+
+```bash
+python -m babysit.photo_sync_bmk \
+  --references babysit/data/photo_sync/references \
+  --output babysit/data/photo_sync_bmk/report.json
+```
+
+输出包括自动复制 recall、包含人工灰区的 recall，以及负样本误复制数。修改参考脸库或阈值后应重复运行。历史 `rejected/review` 可在停止同步进程后重新排队：
+
+```bash
+# 只重新识别视频
+python -m babysit.photo_sync requeue --videos-only
+
+# 重新识别静态照片和视频
+python -m babysit.photo_sync requeue
+
+# 只重新识别 rejected，保留已有 review 状态
+python -m babysit.photo_sync requeue --status rejected
+```
+
+重排后重新运行 `python -m babysit.photo_sync daemon` 即可，已有缩略图和帧缓存会复用。
 
 #### 使用 tmux 长期运行
 

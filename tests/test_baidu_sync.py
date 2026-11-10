@@ -117,6 +117,45 @@ class BaiduPCSClientTests(unittest.TestCase):
             client.copy("/来源/a.jpg", "/目标/a.jpg")
 
     @patch("babysit.baidu_sync.subprocess.run")
+    def test_download_uses_saveto_and_checks_file(self, run):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "a.livp"
+
+            def create_file(*args, **kwargs):
+                target.write_bytes(b"video")
+                return subprocess.CompletedProcess([], 0, "downloaded", "")
+
+            run.side_effect = create_file
+            client = BaiduPCSClient("/opt/BaiduPCS-Go")
+            result = client.download("/来源/a.livp", directory)
+
+            self.assertEqual(result, target)
+            self.assertEqual(
+                run.call_args.args[0],
+                ["/opt/BaiduPCS-Go", "download", "--saveto", directory, "/来源/a.livp"],
+            )
+
+    @patch("babysit.baidu_sync.time.sleep")
+    @patch("babysit.baidu_sync.subprocess.run")
+    def test_download_retries_empty_result(self, run, sleep):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "a.livp"
+            calls = 0
+
+            def download(*args, **kwargs):
+                nonlocal calls
+                calls += 1
+                if calls == 3:
+                    target.write_bytes(b"video")
+                return subprocess.CompletedProcess([], 0, "done", "")
+
+            run.side_effect = download
+            client = BaiduPCSClient()
+            self.assertEqual(client.download("/来源/a.livp", directory), target)
+            self.assertEqual(run.call_count, 3)
+            self.assertEqual(sleep.call_count, 2)
+
+    @patch("babysit.baidu_sync.subprocess.run")
     def test_who_rejects_uid_zero(self, run):
         run.return_value = subprocess.CompletedProcess(
             [], 0, "当前帐号 uid: 0, 用户名:", ""

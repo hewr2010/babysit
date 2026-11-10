@@ -50,6 +50,8 @@ babysit/
 ├── photo_sync_config.py # 照片同步环境配置
 ├── photo_sync_db.py # 照片同步状态与去重
 ├── face_matcher.py # 本地人脸识别
+├── video_frames.py # 视频解包、抽帧与缓存
+├── photo_sync_bmk.py # 本地照片视频识别回归 benchmark
 ├── baidu_sync.py   # 百度图片列表与网盘内复制
 └── utils.py        # 工具函数
 
@@ -140,12 +142,14 @@ frontend/src/
 `photo_sync.py`（可选）- 独立照片筛选进程：
 1. 通过官方图片列表接口增量读取手机备份目录
 2. 每轮先对账目标目录，同名且 MD5 一致、`fs_id` 后缀或内容 MD5 相同即视为已处理
-3. 并发预取缩略图，在本地用 InsightFace 逐张识别女儿
-4. 高分照片通过 BaiduPCS-Go 串行复制到 `/apps/bypy/爸妈与小宝`
-5. 灰区照片通过 CLI 人工确认，SQLite 记录去重与恢复状态
-6. backlog 每 60 秒续跑，追平后恢复常规间隔，配置见 README
-7. 使用 `python -m babysit.photo_sync daemon` 运行
-8. `daemon.log` 记录每张实际复制文件和每轮汇总，无需单独运行观察进程
+3. 并发预取缩略图，在本地用 InsightFace 逐张识别女儿，视频解包抽帧并取最佳帧
+4. 参考照片必须且只能包含一张人脸，多人合照禁止入库，避免家长特征污染
+5. 高分照片通过 BaiduPCS-Go 串行复制到 `/apps/bypy/爸妈与小宝`
+6. 灰区照片通过 CLI 人工确认，SQLite 记录去重与恢复状态
+7. backlog 每 60 秒续跑，追平后恢复常规间隔，配置见 README
+8. 使用 `python -m babysit.photo_sync daemon` 运行
+9. `daemon.log` 记录每张实际复制文件和每轮汇总，无需单独运行观察进程
+10. 使用 `python -m babysit.photo_sync_bmk` 回归识别效果，私人样本不进 Git
 
 ## API 端点
 

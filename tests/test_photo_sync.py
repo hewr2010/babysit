@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from babysit.face_matcher import FaceMatch
+from babysit.face_matcher import FaceMatch, VideoFaceMatch
 from babysit.photo_sync import PhotoSyncService
 from babysit.photo_sync_config import PhotoSyncConfig
 from babysit.photo_sync_db import PhotoSyncStore
@@ -54,6 +54,17 @@ class FakeMatcher:
         self.calls += 1
         score = self.scores[image_bytes.decode()]
         return FaceMatch(score=score, face_count=0 if score is None else 1)
+
+    def match_frames(self, frame_paths):
+        frame_path = Path(frame_paths[0])
+        match = self.match(frame_path.read_bytes())
+        return VideoFaceMatch(
+            score=match.score,
+            face_count=match.face_count,
+            supporting_frames=int(match.score is not None and match.score >= 0.35),
+            frame_count=len(frame_paths),
+            best_frame_path=str(frame_path) if match.score is not None else None,
+        )
 
 
 class FakeCopier:
@@ -134,6 +145,24 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(service.sync()["skipped"], 1)
         self.assertEqual(matcher.calls, 1)
         self.assertEqual(len(copier.copies), 1)
+
+    def test_video_uses_extracted_frames(self):
+        service, store, _, _ = self.service(
+            [[photo(1, name="clip.livp")]], {"1": 0.7}
+        )
+
+        class Extractor:
+            called = False
+
+            def extract(self, item):
+                self.called = True
+                return [Path(service.config.cache_dir) / "1.jpg"]
+
+        extractor = Extractor()
+        service._video_extractor = extractor
+        self.assertEqual(service.sync()["copied"], 1)
+        self.assertTrue(extractor.called)
+        self.assertEqual(store.get(1)["status"], "copied")
 
     def test_medium_and_low_scores_and_no_face(self):
         service, store, _, _ = self.service(
@@ -241,6 +270,24 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(store.get(1)["status"], "error")
         self.assertEqual(store.get(1)["retry_count"], 1)
         self.assertEqual(store.get(1)["source_path"], photo(1)["path"])
+
+    def test_requeue_only_reprocesses_selected_videos(self):
+        store = PhotoSyncStore(self.config.db_path)
+        self.addCleanup(store.close)
+        store.upsert(photo(1, name="photo.jpg"))
+        store.upsert(photo(2, name="clip.livp"))
+        store.upsert(photo(3, name="other.livp"))
+        store.upsert(photo(4, name="copied.livp"))
+        store.set_status(1, "rejected")
+        store.set_status(2, "rejected")
+        store.set_status(3, "review")
+        store.set_status(4, "copied")
+
+        self.assertEqual(store.requeue(["rejected", "review"], videos_only=True), 2)
+        self.assertEqual(store.get(1)["status"], "rejected")
+        self.assertEqual(store.get(2)["status"], "pending")
+        self.assertEqual(store.get(3)["status"], "pending")
+        self.assertEqual(store.get(4)["status"], "copied")
 
     def test_backlog_is_processed_on_later_runs(self):
         from dataclasses import replace

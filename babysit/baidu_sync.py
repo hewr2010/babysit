@@ -1,6 +1,7 @@
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import requests
@@ -142,8 +143,14 @@ class BaiduImageClient:
 
 
 class BaiduPCSClient:
-    def __init__(self, executable="BaiduPCS-Go", timeout=120, config_dir=None):
-        self.executable = executable
+    def __init__(self, executable=None, timeout=120, config_dir=None):
+        local_executable = DATA_DIR / "photo_sync" / "bin" / "BaiduPCS-Go"
+        default_executable = (
+            str(local_executable) if local_executable.exists() else "BaiduPCS-Go"
+        )
+        self.executable = executable or os.environ.get(
+            "PHOTO_SYNC_BAIDUPCS_BIN", default_executable
+        )
         self.timeout = timeout
         self.config_dir = Path(
             config_dir or DATA_DIR / "photo_sync" / "baidupcs-config"
@@ -194,4 +201,21 @@ class BaiduPCSClient:
             return
         raise RuntimeError(
             f"复制或复制后校验失败（exit={result.returncode}）：{self._output(result)}"
+        )
+
+    def download(self, source_path, destination_dir):
+        destination_dir = Path(destination_dir)
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        target = destination_dir / source_path.rsplit("/", 1)[-1]
+        result = None
+        for attempt in range(3):
+            result = self._run(
+                "download", "--saveto", str(destination_dir), source_path
+            )
+            if result.returncode == 0 and target.exists() and target.stat().st_size:
+                return target
+            if attempt < 2:
+                time.sleep(2**attempt)
+        raise RuntimeError(
+            f"视频下载失败（exit={result.returncode}）：{self._output(result)}"
         )

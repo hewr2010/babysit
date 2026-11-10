@@ -13,6 +13,13 @@ class FaceMatch:
     face_count: int
 
 
+@dataclass(frozen=True)
+class VideoFaceMatch(FaceMatch):
+    supporting_frames: int
+    frame_count: int
+    best_frame_path: str | None
+
+
 class InsightFaceMatcher:
     def __init__(self, reference_dir, model_name="buffalo_l", model_dir=None):
         self.reference_dir = Path(reference_dir)
@@ -50,18 +57,14 @@ class InsightFaceMatcher:
         for path in reference_paths:
             image = self._read_image(path.read_bytes())
             faces = self._app.get(image)
-            if not faces:
+            if len(faces) != 1:
+                print(f"参考照片需且只需包含一张人脸，已跳过：{path}")
                 continue
-            face = max(faces, key=self._face_area)
+            face = faces[0]
             embedding = face.normed_embedding
             self._reference_embeddings.append(embedding / np.linalg.norm(embedding))
         if not self._reference_embeddings:
             raise RuntimeError("参考照片中没有检测到可用人脸，请更换清晰正脸照片")
-
-    @staticmethod
-    def _face_area(face):
-        left, top, right, bottom = face.bbox
-        return max(0, right - left) * max(0, bottom - top)
 
     def _read_image(self, image_bytes):
         with Image.open(io.BytesIO(image_bytes)) as image:
@@ -81,3 +84,27 @@ class InsightFaceMatcher:
             score = float(self._np.max(references @ embedding))
             best_score = max(best_score, score)
         return FaceMatch(score=best_score, face_count=len(faces))
+
+    def match_frames(self, frame_paths, support_threshold=0.35):
+        best_score = None
+        best_frame_path = None
+        max_faces = 0
+        supporting_frames = 0
+        frame_paths = list(frame_paths)
+        for path in frame_paths:
+            match = self.match(Path(path).read_bytes())
+            max_faces = max(max_faces, match.face_count)
+            if match.score is None:
+                continue
+            if match.score >= support_threshold:
+                supporting_frames += 1
+            if best_score is None or match.score > best_score:
+                best_score = match.score
+                best_frame_path = str(path)
+        return VideoFaceMatch(
+            score=best_score,
+            face_count=max_faces,
+            supporting_frames=supporting_frames,
+            frame_count=len(frame_paths),
+            best_frame_path=best_frame_path,
+        )

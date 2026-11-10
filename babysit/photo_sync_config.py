@@ -51,7 +51,7 @@ class PhotoSyncConfig:
             baidupcs_bin=os.environ.get(
                 "PHOTO_SYNC_BAIDUPCS_BIN", default_baidupcs
             ),
-            auto_threshold=float(os.environ.get("PHOTO_SYNC_AUTO_THRESHOLD", "0.55")),
+            auto_threshold=float(os.environ.get("PHOTO_SYNC_AUTO_THRESHOLD", "0.54")),
             review_threshold=float(
                 os.environ.get("PHOTO_SYNC_REVIEW_THRESHOLD", "0.35")
             ),

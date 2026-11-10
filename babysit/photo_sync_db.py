@@ -212,6 +212,26 @@ class PhotoSyncStore:
         rows = self.db.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def requeue(self, statuses, videos_only=False):
+        statuses = list(statuses)
+        placeholders = ",".join("?" for _ in statuses)
+        query = f"""
+            UPDATE photo_sync_items
+            SET status = 'pending', error = NULL, retry_count = 0,
+                target_path = NULL, updated_at = CURRENT_TIMESTAMP
+            WHERE status IN ({placeholders})
+        """
+        params = list(statuses)
+        if videos_only:
+            query += """
+                AND (lower(filename) LIKE '%.livp'
+                     OR lower(filename) LIKE '%.mp4'
+                     OR lower(filename) LIKE '%.mov')
+            """
+        cursor = self.db.execute(query, params)
+        self.db.commit()
+        return cursor.rowcount
+
     def get_state(self, key):
         row = self.db.execute(
             "SELECT value FROM photo_sync_state WHERE key = ?", (key,)

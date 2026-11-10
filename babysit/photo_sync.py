@@ -11,6 +11,7 @@ from .baidu_sync import BaiduImageClient, BaiduPCSClient
 from .face_matcher import InsightFaceMatcher
 from .photo_sync_config import PhotoSyncConfig
 from .photo_sync_db import HANDLED_STATUSES, PhotoSyncStore
+from .video_frames import VIDEO_EXTENSIONS, VideoFrameExtractor
 
 
 class PhotoSyncService:
@@ -22,6 +23,7 @@ class PhotoSyncService:
         )
         self.copier = copier or BaiduPCSClient(config.baidupcs_bin)
         self._matcher = matcher
+        self._video_extractor = None
 
     @property
     def matcher(self):
@@ -32,6 +34,14 @@ class PhotoSyncService:
                 self.config.model_dir,
             )
         return self._matcher
+
+    @property
+    def video_extractor(self):
+        if self._video_extractor is None:
+            self._video_extractor = VideoFrameExtractor(
+                self.copier, self.config.cache_dir.parent / "video_work"
+            )
+        return self._video_extractor
 
     def _target_path(self, item):
         if item.get("target_path"):
@@ -91,7 +101,13 @@ class PhotoSyncService:
         try:
             if not thumbnail_path.exists():
                 self.image_client.download_thumbnail(photo, thumbnail_path)
-            match = self.matcher.match(thumbnail_path.read_bytes())
+            if Path(photo["server_filename"]).suffix.lower() in VIDEO_EXTENSIONS:
+                frames = self.video_extractor.extract(photo)
+                match = self.matcher.match_frames(frames)
+                if match.best_frame_path:
+                    thumbnail_path = Path(match.best_frame_path)
+            else:
+                match = self.matcher.match(thumbnail_path.read_bytes())
             if match.score is None or match.score < self.config.review_threshold:
                 self.store.set_match(
                     fs_id, "rejected", match.score, match.face_count, thumbnail_path
@@ -348,6 +364,10 @@ def main(argv=None):
     reject_parser = subparsers.add_parser("reject", help="跳过一条待确认照片")
     reject_parser.add_argument("fs_id")
 
+    requeue_parser = subparsers.add_parser("requeue", help="重新识别历史 rejected/review")
+    requeue_parser.add_argument("--status", choices=["rejected", "review"])
+    requeue_parser.add_argument("--videos-only", action="store_true")
+
     subparsers.add_parser("doctor", help="检查授权、参考照片和来源目录")
     args = parser.parse_args(argv)
 
@@ -394,6 +414,10 @@ def main(argv=None):
         elif args.command == "reject":
             service.reject(args.fs_id)
             print("已标记为跳过")
+        elif args.command == "requeue":
+            statuses = [args.status] if args.status else ["rejected", "review"]
+            count = service.store.requeue(statuses, args.videos_only)
+            print(f"已重新排队 {count} 个文件")
         elif args.command == "doctor":
             result = service.doctor()
             print(f"来源目录读取成功，本页返回 {result['photos_visible']} 张照片")
