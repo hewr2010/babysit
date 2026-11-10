@@ -1,3 +1,8 @@
 __pycache__
 .baidu_auth_code
 test_*.png
+node_modules/
+dist/
+.DS_Store
+*.log
+screenshot_*.png
