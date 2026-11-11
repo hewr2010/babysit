@@ -14,29 +14,29 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { AUTH_KEY } from '@/config'
+import { isVerified, verifyName } from '@/services/auth'
 
-const CORRECT_NAME = '何与青'
 const name = ref('')
 const error = ref('')
 const redirect = ref('')
 
 onLoad(options => {
-  if (options.redirect?.startsWith('/pages/viewer/viewer')) {
+  const allowedPrefixes = ['/pages/viewer/viewer', '/pages/index/index', '/pages/milestones/manage']
+  if (allowedPrefixes.some(prefix => options.redirect?.startsWith(prefix))) {
     redirect.value = options.redirect
   }
 })
 
 onMounted(() => {
-  if (uni.getStorageSync(AUTH_KEY) === 'true') continueToTarget()
+  if (isVerified()) continueToTarget()
 })
 
 function verify() {
-  if (name.value.trim() !== CORRECT_NAME) {
+  if (!verifyName(name.value.trim())) {
     error.value = '名字不对，请再试一次'
     return
   }
-  uni.setStorageSync(AUTH_KEY, 'true')
+  error.value = ''
   continueToTarget()
 }
 

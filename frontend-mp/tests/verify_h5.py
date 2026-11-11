@@ -50,6 +50,7 @@ def main():
                 page.locator(".auth-input input").fill("何与青")
                 page.locator(".auth-button").click()
                 expect(page.locator(".growth-section")).to_be_visible(timeout=15000)
+                assert page.evaluate("localStorage.getItem('baby_auth_verified')") == 'true'
                 expect(page.locator(".metric-card").nth(1)).to_contain_text("4.2")
                 expect(page.locator(".metric-card").nth(1)).to_contain_text("kg")
                 page.screenshot(path=OUTPUT / "02-home.png", full_page=True)
@@ -115,6 +116,9 @@ def main():
                 shared_page.locator(".auth-button").click()
                 expect(shared_page.locator(".viewer-page")).to_be_visible(timeout=15000)
                 expect(shared_page.locator(".viewer-name")).to_have_text("第三张照片.jpg")
+                manage_page = browser.new_page()
+                manage_page.goto(f"{base_url}#/pages/milestones/manage")
+                expect(manage_page.locator(".auth-card")).to_be_visible(timeout=10000)
                 browser.close()
                 if errors:
                     raise AssertionError("Browser errors:\n" + "\n".join(errors))
