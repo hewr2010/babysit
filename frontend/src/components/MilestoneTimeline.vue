@@ -17,7 +17,7 @@
         >
           <div class="milestone-thumb">
             <img
-              :src="authorizedUrl(`/thumb/${encodeURIComponent(milestone.media_filename)}`)"
+              :src="`/thumb/${encodeURIComponent(milestone.media_filename)}`"
               loading="lazy"
             />
             <span v-if="milestone.file_type === 'video'" class="video-badge">▶</span>
@@ -54,7 +54,6 @@
 <script setup>
 import { computed } from 'vue'
 import { useAppStore } from '../stores/app'
-import { authorizedUrl } from '@/services/auth'
 import { useModalStore } from '../stores/modal'
 
 const store = useAppStore()

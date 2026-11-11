@@ -3,10 +3,10 @@
     <view class="auth-card">
       <view class="auth-symbol">👶</view>
       <text class="auth-title">宝宝成长日志</text>
-      <text class="auth-description">请输入家庭访问密码以继续访问</text>
-      <input v-model="name" class="field-input auth-input" password placeholder="家庭访问密码" confirm-type="done" @confirm="verify" />
+      <text class="auth-description">请输入宝宝的真名以继续访问</text>
+      <input v-model="name" class="field-input auth-input" placeholder="宝宝真名" confirm-type="done" @confirm="verify" />
       <text v-if="error" class="auth-error">{{ error }}</text>
-      <button class="primary-button auth-button" :disabled="!name.trim() || saving" @click="verify">{{ saving ? '验证中…' : '进入' }}</button>
+      <button class="primary-button auth-button" :disabled="!name.trim()" @click="verify">进入</button>
     </view>
   </view>
 </template>
@@ -14,36 +14,30 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { getAccessToken, login } from '@/services/auth'
+import { AUTH_KEY } from '@/config'
 
+const CORRECT_NAME = '何与青'
 const name = ref('')
 const error = ref('')
 const redirect = ref('')
-const saving = ref(false)
 
 onLoad(options => {
-  const allowedPrefixes = ['/pages/viewer/viewer', '/pages/index/index', '/pages/milestones/manage']
-  if (allowedPrefixes.some(prefix => options.redirect?.startsWith(prefix))) {
+  if (options.redirect?.startsWith('/pages/viewer/viewer')) {
     redirect.value = options.redirect
   }
 })
 
 onMounted(() => {
-  if (getAccessToken()) continueToTarget()
+  if (uni.getStorageSync(AUTH_KEY) === 'true') continueToTarget()
 })
 
-async function verify() {
-  if (!name.value.trim() || saving.value) return
-  saving.value = true
-  error.value = ''
-  try {
-    await login(name.value.trim())
-    continueToTarget()
-  } catch (loginError) {
-    error.value = loginError.message || '验证失败，请重试'
-  } finally {
-    saving.value = false
+function verify() {
+  if (name.value.trim() !== CORRECT_NAME) {
+    error.value = '名字不对，请再试一次'
+    return
   }
+  uni.setStorageSync(AUTH_KEY, 'true')
+  continueToTarget()
 }
 
 function continueToTarget() {

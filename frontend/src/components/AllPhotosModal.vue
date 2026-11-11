@@ -19,7 +19,7 @@
                   <div v-for="photo in photos" :key="photo.name"
                        class="photo-item" :class="{ video: photo.type === 'video' }"
                        @click="openPhoto(photo)">
-                    <img :src="authorizedUrl(`/thumb/${encodeURIComponent(photo.name)}`)" loading="lazy" />
+                    <img :src="`/thumb/${encodeURIComponent(photo.name)}`" loading="lazy" />
                     <span v-if="photo.time" class="photo-time">{{ photo.time }}</span>
                   </div>
                 </div>
@@ -35,7 +35,6 @@
 <script setup>
 import { computed } from 'vue'
 import { useAppStore } from '../stores/app'
-import { authorizedUrl } from '@/services/auth'
 import { useModalStore } from '../stores/modal'
 
 const store = useAppStore()

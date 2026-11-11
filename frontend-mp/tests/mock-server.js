@@ -53,29 +53,13 @@ async function startMockServer(videoPath) {
     const pathname = decodeURIComponent(url.pathname)
     state.requests.push(`${request.method} ${pathname}`)
     response.setHeader('Access-Control-Allow-Origin', '*')
-    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
     response.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
     if (request.method === 'OPTIONS') {
       response.writeHead(204).end()
       return
     }
     const json = value => response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(value))
-
-    if (pathname === '/api/auth/login' && request.method === 'POST') {
-      readJson(request, data => {
-        if (data.password === '何与青') {
-          json({ token: 'mock-access-token', expires_in: 604800 })
-        } else {
-          response.writeHead(401, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: '访问密码不正确' }))
-        }
-      })
-      return
-    }
-    const authorized = request.headers.authorization === 'Bearer mock-access-token' || url.searchParams.get('access_token') === 'mock-access-token'
-    if (!authorized && (pathname.startsWith('/api/') || pathname.startsWith('/thumb/') || pathname.startsWith('/preview/') || pathname.startsWith('/video/') || pathname.startsWith('/livp/'))) {
-      response.writeHead(401, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: '请先验证访问密码' }))
-      return
-    }
 
     if (pathname === '/api/baby') {
       if (request.method === 'POST') {

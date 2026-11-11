@@ -58,7 +58,6 @@
 
 <script setup>
 import { computed, ref, watch } from 'vue'
-import { authorizedUrl } from '@/services/auth'
 
 const props = defineProps({
   photo: {
@@ -116,14 +115,14 @@ const videoFormat = computed(() => {
 })
 const previewUrl = computed(() => {
   if (!props.photo) return ''
-  return authorizedUrl(`/preview/${encodeURIComponent(props.photo.name)}`)
+  return `/preview/${encodeURIComponent(props.photo.name)}`
 })
 const videoUrl = computed(() => {
   if (!props.photo || props.photo.type !== 'video') return ''
   const filename = props.photo.name
-  return authorizedUrl(filename.toLowerCase().endsWith('.livp')
+  return filename.toLowerCase().endsWith('.livp')
     ? `/livp/${encodeURIComponent(filename)}`
-    : `/video/${encodeURIComponent(filename)}`)
+    : `/video/${encodeURIComponent(filename)}`
 })
 
 function onLoaded() {

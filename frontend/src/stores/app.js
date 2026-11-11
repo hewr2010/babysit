@@ -1,7 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import dayjs from 'dayjs'
-import { authFetch } from '@/services/auth'
 
 const API_BASE = '/api'
 
@@ -56,12 +55,12 @@ export const useAppStore = defineStore('app', () => {
 
   // Actions
   async function fetchBaby() {
-    const res = await authFetch(`${API_BASE}/baby`)
+    const res = await fetch(`${API_BASE}/baby`)
     baby.value = await res.json()
   }
 
   async function saveBaby(data) {
-    await authFetch(`${API_BASE}/baby`, {
+    await fetch(`${API_BASE}/baby`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -74,7 +73,7 @@ export const useAppStore = defineStore('app', () => {
   async function fetchPhotos() {
     loading.value = true
     try {
-      const res = await authFetch(`${API_BASE}/album/${currentYear.value}/${currentMonth.value}`)
+      const res = await fetch(`${API_BASE}/album/${currentYear.value}/${currentMonth.value}`)
       const dateGroups = await res.json()
 
       // 按日期分组，保持结构
@@ -95,12 +94,12 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function fetchGrowth() {
-    const res = await authFetch(`${API_BASE}/growth`)
+    const res = await fetch(`${API_BASE}/growth`)
     growthRecords.value = await res.json()
   }
 
   async function addGrowth(data) {
-    await authFetch(`${API_BASE}/growth`, {
+    await fetch(`${API_BASE}/growth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
@@ -109,13 +108,13 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function deleteGrowth(id) {
-    await authFetch(`${API_BASE}/growth/${id}`, { method: 'DELETE' })
+    await fetch(`${API_BASE}/growth/${id}`, { method: 'DELETE' })
     await fetchGrowth()
   }
 
   async function fetchMilestones() {
     try {
-      const res = await authFetch(`${API_BASE}/milestones`)
+      const res = await fetch(`${API_BASE}/milestones`)
       milestones.value = await res.json()
     } catch (e) {
       console.error('Failed to fetch milestones:', e)

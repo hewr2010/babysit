@@ -1,5 +1,4 @@
 import { API_HOST, MAX_DOWNLOAD_SIZE } from '@/config'
-import { authorizedUrl } from '@/services/auth'
 import { previewWindow } from '@/utils/album'
 
 function encoded(filename) {
@@ -7,16 +6,16 @@ function encoded(filename) {
 }
 
 export function thumbUrl(filename) {
-  return authorizedUrl(`${API_HOST}/thumb/${encoded(filename)}`)
+  return `${API_HOST}/thumb/${encoded(filename)}`
 }
 
 export function previewUrl(filename) {
-  return authorizedUrl(`${API_HOST}/preview/${encoded(filename)}`)
+  return `${API_HOST}/preview/${encoded(filename)}`
 }
 
 export function videoUrl(item) {
   const route = item.name.toLowerCase().endsWith('.livp') ? 'livp' : 'video'
-  return authorizedUrl(`${API_HOST}/${route}/${encoded(item.name)}`)
+  return `${API_HOST}/${route}/${encoded(item.name)}`
 }
 
 export function nativePreviewOptions(media, index) {
@@ -49,7 +48,7 @@ export async function saveToAlbum(item) {
     throw new Error('文件超过 50MB，无法保存到相册')
   }
   const isVideo = item.type === 'video'
-  const url = isVideo ? videoUrl(item) : authorizedUrl(`${API_HOST}/api/download/${encoded(item.name)}`)
+  const url = isVideo ? videoUrl(item) : `${API_HOST}/api/download/${encoded(item.name)}`
   const filePath = await download(url)
   await new Promise((resolve, reject) => {
     const options = {

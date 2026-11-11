@@ -114,7 +114,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 import SlideContent from './SlideContent.vue'
-import { authFetch, authorizedUrl } from '@/services/auth'
 
 const API_BASE = '/api'
 
@@ -173,7 +172,7 @@ async function loadMilestones() {
     return
   }
   try {
-    const res = await authFetch(`${API_BASE}/milestones/${encodeURIComponent(currentPhoto.value.name)}`)
+    const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(currentPhoto.value.name)}`)
     if (res.ok) {
       milestones.value = await res.json()
     }
@@ -207,7 +206,7 @@ async function downloadOriginal() {
 
   try {
     const filename = encodeURIComponent(currentPhoto.value.name)
-    const downloadUrl = authorizedUrl(`/api/download/${filename}`)
+    const downloadUrl = `/api/download/${filename}`
 
     const a = document.createElement('a')
     a.href = downloadUrl

@@ -25,7 +25,6 @@ import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import MilestoneEditor from '@/components/MilestoneEditor.vue'
 import { request } from '@/services/api'
-import { requireAuth } from '@/services/auth'
 import { thumbUrl } from '@/services/media'
 import { useAppStore } from '@/stores/app'
 import { albumMonths, flattenAlbum } from '@/utils/album'
@@ -38,9 +37,7 @@ const loading = ref(true)
 const editorVisible = ref(false)
 const selectedMedia = ref(null)
 
-onLoad(() => {
-  if (requireAuth()) initialize()
-})
+onLoad(initialize)
 
 async function initialize() {
   loading.value = true

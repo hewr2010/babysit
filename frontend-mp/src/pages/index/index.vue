@@ -29,7 +29,6 @@ import MilestoneSection from '@/components/MilestoneSection.vue'
 import NativeTabBar from '@/components/NativeTabBar.vue'
 import { useAppStore } from '@/stores/app'
 import { nativePreviewOptions, previewUrl, thumbUrl } from '@/services/media'
-import { requireAuth } from '@/services/auth'
 import { mediaSharePath } from '@/utils/share'
 
 const store = useAppStore()
@@ -50,9 +49,7 @@ onShareAppMessage(() => {
   }
 })
 
-onLoad(() => {
-  if (requireAuth()) initialize()
-})
+onLoad(initialize)
 
 function onMediaActions(item) {
   sharedMedia.value = item
