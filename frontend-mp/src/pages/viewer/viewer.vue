@@ -54,7 +54,7 @@
 import { computed, ref } from 'vue'
 import { onLoad, onShareAppMessage, onUnload } from '@dcloudio/uni-app'
 import MilestoneEditor from '@/components/MilestoneEditor.vue'
-import { AUTH_KEY } from '@/config'
+import { requireAuth } from '@/services/auth'
 import { previewUrl, saveToAlbum, thumbUrl, videoUrl } from '@/services/media'
 import { useAppStore } from '@/stores/app'
 import { decodeMediaName, mediaSharePath } from '@/utils/share'
@@ -89,12 +89,7 @@ onLoad(async options => {
       headerRightPadding.value = Math.ceil(system.windowWidth - menuButton.left + 12)
     }
   } catch (error) {}
-  if (uni.getStorageSync(AUTH_KEY) !== 'true') {
-    const query = Object.entries(options).map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join('&')
-    const target = `/pages/viewer/viewer${query ? `?${query}` : ''}`
-    uni.reLaunch({ url: `/pages/auth/auth?redirect=${encodeURIComponent(target)}` })
-    return
-  }
+  if (!requireAuth()) return
 
   if (options.media) {
     await openSharedMedia(options)

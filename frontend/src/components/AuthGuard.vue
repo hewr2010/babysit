@@ -6,19 +6,19 @@
     <div class="auth-box">
       <div class="auth-icon">👶</div>
       <h2 class="auth-title">宝宝成长日志</h2>
-      <p class="auth-desc">请输入宝宝的真名以继续访问</p>
+      <p class="auth-desc">请输入家庭访问密码以继续访问</p>
       <div class="auth-input-wrapper">
         <input
           v-model="inputName"
-          type="text"
-          placeholder="宝宝真名"
+          type="password"
+          placeholder="家庭访问密码"
           class="auth-input"
           @keyup.enter="verify"
         />
       </div>
       <p v-if="errorMsg" class="auth-error">{{ errorMsg }}</p>
-      <button class="auth-btn" @click="verify" :disabled="!inputName.trim()">
-        进入
+      <button class="auth-btn" @click="verify" :disabled="!inputName.trim() || saving">
+        {{ saving ? '验证中…' : '进入' }}
       </button>
     </div>
   </div>
@@ -26,33 +26,29 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-
-const CORRECT_NAME = '何与青'
-const AUTH_KEY = 'baby_auth_verified'
+import { getAccessToken, login } from '@/services/auth'
 
 const isAuthenticated = ref(false)
 const inputName = ref('')
 const errorMsg = ref('')
+const saving = ref(false)
 
 onMounted(() => {
-  // 检查 localStorage 中是否已验证
-  const verified = localStorage.getItem(AUTH_KEY)
-  if (verified === 'true') {
-    isAuthenticated.value = true
-  }
+  isAuthenticated.value = Boolean(getAccessToken())
 })
 
-function verify() {
-  const name = inputName.value.trim()
-  if (!name) return
-
-  if (name === CORRECT_NAME) {
-    localStorage.setItem(AUTH_KEY, 'true')
+async function verify() {
+  if (!inputName.value.trim() || saving.value) return
+  saving.value = true
+  errorMsg.value = ''
+  try {
+    await login(inputName.value.trim())
     isAuthenticated.value = true
-    errorMsg.value = ''
-  } else {
-    errorMsg.value = '名字不对哦，请再试一次'
+  } catch (error) {
+    errorMsg.value = error.message || '验证失败，请重试'
     inputName.value = ''
+  } finally {
+    saving.value = false
   }
 }
 </script>

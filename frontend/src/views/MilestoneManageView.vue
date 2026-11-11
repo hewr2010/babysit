@@ -49,7 +49,7 @@
             :class="{ 'has-milestone': getPhotoMilestones(photo.name).length > 0 }"
             @click="openEditor(photo)"
           >
-            <img :src="`/thumb/${encodeURIComponent(photo.name)}`" loading="lazy" />
+            <img :src="authorizedUrl(`/thumb/${encodeURIComponent(photo.name)}`)" loading="lazy" />
             <div v-if="photo.type === 'video'" class="video-badge">▶</div>
 
             <!-- 已标记指示器 -->
@@ -82,7 +82,7 @@
               <div class="photo-preview">
                 <img
                   v-if="editorPhoto"
-                  :src="`/preview/${encodeURIComponent(editorPhoto.name)}`"
+                  :src="authorizedUrl(`/preview/${encodeURIComponent(editorPhoto.name)}`)"
                 />
               </div>
 
@@ -146,6 +146,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import dayjs from 'dayjs'
+import { authFetch, authorizedUrl } from '@/services/auth'
 
 const API_BASE = '/api'
 
@@ -174,7 +175,7 @@ onMounted(() => {
 async function initAvailableMonths() {
   try {
     // 获取所有已处理的媒体文件
-    const res = await fetch(`${API_BASE}/album`)
+    const res = await authFetch(`${API_BASE}/album`)
     if (!res.ok) return
 
     const allPhotos = await res.json()
@@ -232,7 +233,7 @@ function updateMonthCounts() {
 
 async function fetchAllMilestones() {
   try {
-    const res = await fetch(`${API_BASE}/milestones`)
+    const res = await authFetch(`${API_BASE}/milestones`)
     if (res.ok) {
       allMilestones.value = await res.json()
 
@@ -264,7 +265,7 @@ function selectMonth(monthKey) {
 async function loadMonthPhotos(year, month) {
   loading.value = true
   try {
-    const res = await fetch(`${API_BASE}/album/${year}/${month}`)
+    const res = await authFetch(`${API_BASE}/album/${year}/${month}`)
     if (res.ok) {
       const dateGroups = await res.json()
 
@@ -294,7 +295,7 @@ async function openEditor(photo) {
 
   // 加载已有关联时刻
   try {
-    const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(photo.name)}`)
+    const res = await authFetch(`${API_BASE}/milestones/${encodeURIComponent(photo.name)}`)
     if (res.ok) {
       editorMilestones.value = await res.json()
     }
@@ -314,7 +315,7 @@ async function addMilestone() {
 
   adding.value = true
   try {
-    const res = await fetch(`${API_BASE}/milestones`, {
+    const res = await authFetch(`${API_BASE}/milestones`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -346,7 +347,7 @@ async function addMilestone() {
 async function deleteMilestone(id) {
   deleting.value = id
   try {
-    const res = await fetch(`${API_BASE}/milestones/${id}`, {
+    const res = await authFetch(`${API_BASE}/milestones/${id}`, {
       method: 'DELETE'
     })
 

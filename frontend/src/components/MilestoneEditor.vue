@@ -12,7 +12,7 @@
             <div class="photo-preview">
               <img
                 v-if="photo"
-                :src="`/thumb/${encodeURIComponent(photo.name)}`"
+                :src="authorizedUrl(`/thumb/${encodeURIComponent(photo.name)}`)"
               />
             </div>
 
@@ -75,6 +75,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { useModalStore } from '../stores/modal'
+import { authFetch, authorizedUrl } from '@/services/auth'
 
 const API_BASE = '/api'
 
@@ -102,7 +103,7 @@ watch(() => modalStore.milestoneEditor, (val) => {
 async function fetchExistingMilestones() {
   if (!photo.value) return
   try {
-    const res = await fetch(`${API_BASE}/milestones/${encodeURIComponent(photo.value.name)}`)
+    const res = await authFetch(`${API_BASE}/milestones/${encodeURIComponent(photo.value.name)}`)
     existingMilestones.value = await res.json()
   } catch (e) {
     console.error('Failed to fetch milestones:', e)
@@ -114,7 +115,7 @@ async function save() {
 
   saving.value = true
   try {
-    const res = await fetch(`${API_BASE}/milestones`, {
+    const res = await authFetch(`${API_BASE}/milestones`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -147,7 +148,7 @@ async function deleteMilestone(id) {
   if (!confirm('确定要删除这个时刻吗？')) return
 
   try {
-    const res = await fetch(`${API_BASE}/milestones/${id}`, {
+    const res = await authFetch(`${API_BASE}/milestones/${id}`, {
       method: 'DELETE'
     })
 

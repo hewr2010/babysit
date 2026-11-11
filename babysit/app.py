@@ -15,6 +15,7 @@ from flask import Flask, render_template, jsonify, request, send_file, send_from
 from PIL import Image
 
 from .config import DATA_DIR, CACHE_DIR
+from .auth import register_auth
 from .db import (init_db, close_db, get_baby, add_baby,
                  get_growth_records, add_growth, delete_growth,
                  get_all_processed_media, get_processed_media_by_month,
@@ -35,6 +36,7 @@ def create_app():
 
     app.teardown_appcontext(close_db)
     init_db()
+    register_auth(app)
 
     @app.route("/")
     def index():
