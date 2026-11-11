@@ -25,7 +25,7 @@ export function redirectToLogin() {
 }
 
 export function requireAuth() {
-  if (verified) return true
+  if (isVerified()) return true
   redirectToLogin()
   return false
 }

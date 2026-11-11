@@ -61,6 +61,13 @@ async function run() {
     from: "import { AUTH_KEY } from '@/config'",
     to: "const AUTH_KEY = 'baby_auth_verified'"
   })
+  global.getCurrentPages = () => [{ route: 'pages/index/index', options: {} }]
+  let loginRedirects = 0
+  uni.reLaunch = () => { loginRedirects += 1 }
+  uni.values.baby_auth_verified = 'true'
+  assert.equal(auth.requireAuth(), true)
+  assert.equal(loginRedirects, 0)
+  delete uni.values.baby_auth_verified
   assert.equal(auth.isVerified(), false)
   assert.equal(auth.verifyName('错误姓名'), false)
   assert.equal(auth.verifyName('何与青'), true)
