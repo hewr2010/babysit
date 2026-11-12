@@ -148,6 +148,7 @@ async function saveCurrent() {
   position: relative;
   overflow: hidden;
   width: 100%;
+  height: 220rpx;
   aspect-ratio: 1;
   border-radius: 16rpx;
   background: #fdf2f8;
