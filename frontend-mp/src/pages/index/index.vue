@@ -92,7 +92,15 @@ function showRecordOptions() {
 function openMedia(index) {
   uni.previewMedia({
     ...nativePreviewOptions(store.media, index),
-    fail: () => uni.showToast({ title: '媒体暂时无法播放，请重试', icon: 'none' })
+    fail: () => uni.showModal({
+      title: '媒体暂时无法播放',
+      content: '历史媒体可能正在从网盘恢复，原文件仍在网盘。请稍后重试。',
+      confirmText: '重试',
+      cancelText: '返回',
+      success: result => {
+        if (result.confirm) openMedia(index)
+      }
+    })
   })
 }
 

@@ -331,6 +331,46 @@ def test_cold_preview_request_recovers_on_backend(media_env, monkeypatch):
     assert calls[0][3]["include_neighbor_videos"] is True
 
 
+def test_missing_thumbnail_is_not_ready_even_with_preview(media_env):
+    db_path, _ = media_env
+    add_media(db_path, "cold.jpg")
+    thumbnail_path("cold.jpg").unlink()
+    preview_path("cold.jpg").write_bytes(b"preview")
+    enqueue_warm("cold.jpg", "client", generation=1)
+
+    assert get_media_status("cold.jpg")["state"] == "queued"
+    job = claim_next_warm_job()
+    assert job["status"] == "processing"
+
+
+def test_cold_thumbnail_request_recovers_real_image(media_env, monkeypatch):
+    import babysit.app as app_module
+
+    db_path, cache_dir = media_env
+    add_media(db_path, "cold.jpg")
+    monkeypatch.setattr(app_module, "CACHE_DIR", cache_dir)
+    client = app_module.create_app().test_client()
+    thumbnail_path("cold.jpg").unlink()
+
+    def recover(filename, client_id, neighbors, **kwargs):
+        result = enqueue_warm(
+            filename,
+            client_id,
+            neighbors,
+            generation=kwargs["generation"],
+            include_neighbor_videos=kwargs["include_neighbor_videos"],
+        )
+        thumbnail_path(filename).write_bytes(b"real-thumbnail")
+        preview_path(filename).write_bytes(b"preview")
+        return result
+
+    monkeypatch.setattr(app_module, "enqueue_warm", recover)
+    response = client.get("/thumb/cold.jpg")
+
+    assert response.status_code == 200
+    assert response.data == b"real-thumbnail"
+
+
 def test_streaming_partial_video_status_and_route(media_env, monkeypatch):
     import babysit.app as app_module
 

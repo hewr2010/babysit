@@ -121,6 +121,13 @@ def _file_size(path):
     return path.stat().st_size if path and path.is_file() else 0
 
 
+def image_assets_ready(filename, cache_dir=None):
+    return (
+        _file_size(thumbnail_path(filename, cache_dir)) > 0
+        and _file_size(preview_path(filename, cache_dir)) > 0
+    )
+
+
 def record_cache_assets(filename, cache_dir=None, db_path=None):
     preview_size = _file_size(preview_path(filename, cache_dir))
     video_size = _file_size(existing_video_path(filename, cache_dir))
@@ -191,7 +198,7 @@ def _latest_job(db, filename, kind):
 
 
 def get_media_status(filename, cache_dir=None, db_path=None):
-    preview_ready = _file_size(preview_path(filename, cache_dir)) > 0
+    preview_ready = image_assets_ready(filename, cache_dir)
     is_video = Path(filename).suffix.lower() in VIDEO_EXTS
     video_ready = _file_size(existing_video_path(filename, cache_dir)) > 0
     db = _connect(db_path)
@@ -276,7 +283,7 @@ def enqueue_warm(
             ready = (
                 _file_size(existing_video_path(name, cache_dir)) > 0
                 if kind == "video"
-                else _file_size(preview_path(name, cache_dir)) > 0
+                else image_assets_ready(name, cache_dir)
             )
             if ready:
                 continue
@@ -322,7 +329,7 @@ def _job_output_ready(job, cache_dir=None):
         return _file_size(original_livp_path(job["filename"], cache_dir)) > 0
     if job["kind"] == "video":
         return _file_size(existing_video_path(job["filename"], cache_dir)) > 0
-    return _file_size(preview_path(job["filename"], cache_dir)) > 0
+    return image_assets_ready(job["filename"], cache_dir)
 
 
 def enqueue_original_livp(filename, cache_dir=None, db_path=None):
@@ -393,7 +400,9 @@ def claim_next_warm_job(cache_dir=None, db_path=None):
             )
             db.commit()
             if not ready:
-                return dict(job)
+                claimed = dict(job)
+                claimed["status"] = "processing"
+                return claimed
             db.execute("BEGIN IMMEDIATE")
     except Exception:
         db.rollback()

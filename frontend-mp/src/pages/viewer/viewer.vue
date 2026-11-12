@@ -63,7 +63,6 @@ async function openPreview() {
   }
   uni.previewMedia({
     ...nativePreviewOptions(store.media, currentIndex.value),
-    success: () => goHome(),
     fail: error => {
       loading.value = false
       loadError.value = error.errMsg || '媒体暂时无法播放，请重试'

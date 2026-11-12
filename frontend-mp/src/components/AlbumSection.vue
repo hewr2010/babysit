@@ -5,14 +5,14 @@
       <text class="album-count">{{ store.albumLoading ? '加载中…' : `${store.media.length} 项` }}</text>
     </view>
     <view v-if="!store.media.length && !store.albumLoading" class="empty-state">这个月还没有照片或视频</view>
-    <view v-for="group in groups" :key="group.date" class="album-day">
+    <view v-for="(group, groupIndex) in groups" :key="group.date" class="album-day">
       <view class="day-heading">
         <text>{{ shortDate(group.date) }}</text>
         <text class="day-count">{{ group.items.length }} 项</text>
       </view>
       <view class="media-grid">
         <view v-for="item in visibleItems(group)" :key="item.name" class="media-cell" @click="open(item)" @longpress.stop="showActions(item)">
-          <image class="media-thumb" :src="thumbUrl(item.name)" mode="aspectFill" lazy-load />
+          <image class="media-thumb" :src="thumbUrl(item.name)" mode="aspectFill" :lazy-load="groupIndex > 0" />
           <view v-if="item.type === 'video'" class="video-badge">▶</view>
           <view v-if="milestoneNames.has(item.name)" class="milestone-badge">⭐</view>
           <button class="media-menu-button" @click.stop="showActions(item)">···</button>
@@ -215,14 +215,14 @@ async function saveCurrent() {
   z-index: 1;
   top: 8rpx;
   right: 8rpx;
-  width: 52rpx;
-  height: 52rpx;
+  width: 88rpx;
+  height: 88rpx;
   padding: 0;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.55);
   color: #ffffff;
   text-align: center;
-  line-height: 46rpx;
+  line-height: 80rpx;
   font-size: 28rpx;
 }
 

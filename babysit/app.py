@@ -5,7 +5,6 @@ babysit - 宝宝成长管家 (Vue3版)
     python -m babysit.app
 """
 
-import io
 import os
 import time
 from datetime import datetime
@@ -13,7 +12,6 @@ from pathlib import Path
 from urllib.parse import unquote, quote
 
 from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, redirect, Response
-from PIL import Image
 
 from .config import DATA_DIR, CACHE_DIR
 from .db import (init_db, close_db, get_baby, add_baby,
@@ -178,12 +176,16 @@ def create_app():
     @app.route("/thumb/<path:filename>")
     def thumbnail(filename):
         cache_file = CACHE_DIR / "thumbs" / f"{quote(filename, safe='')}_200x200.jpg"
+        if not cache_file.exists():
+            try:
+                recover_cold_media(filename)
+            except (TimeoutError, RuntimeError) as error:
+                return jsonify({"error": "RECOVERY_FAILED", "message": str(error)}), 503
+            except FileNotFoundError:
+                return jsonify({"error": "媒体不存在"}), 404
         if cache_file.exists():
             return send_file(cache_file, mimetype="image/jpeg")
-        placeholder = io.BytesIO()
-        Image.new("RGB", (200, 200), color="#ffc0cb").save(placeholder, format="JPEG")
-        placeholder.seek(0)
-        return send_file(placeholder, mimetype="image/jpeg")
+        return jsonify({"error": "RECOVERY_FAILED", "message": "缩略图恢复失败"}), 503
 
     def recover_cold_media(filename):
         from .db import get_db
@@ -205,7 +207,7 @@ def create_app():
             generation=time.time_ns(),
             include_neighbor_videos=True,
         )
-        deadline = time.monotonic() + 45
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             status = get_media_status(filename)
             if status["state"] in ("ready", "streaming"):
@@ -298,7 +300,7 @@ def create_app():
 
     def download_livp_video(filename, file_size):
         enqueue_original_livp(filename)
-        deadline = time.monotonic() + 45
+        deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             status = get_original_livp_status(filename)
             if status["state"] == "error":
