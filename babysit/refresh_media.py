@@ -15,17 +15,17 @@
 import argparse
 import io
 import os
-import shutil
 import subprocess
 import sys
+import threading
 import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import quote
 
 import requests
-from PIL import Image
+from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS
 from pillow_heif import register_heif_opener
 
@@ -35,6 +35,19 @@ register_heif_opener()
 # 导入项目配置和数据库模块
 from .config import CACHE_DIR, BAIDU_REMOTE_PATH, PCS_API_BASE, DATA_DIR
 from .db import get_standalone_db, update_media_file, delete_media_file
+from .media_cache import (
+    claim_next_warm_job,
+    enforce_cache_budget,
+    existing_video_path,
+    finish_warm_job,
+    has_queued_warm_job,
+    init_media_cache,
+    original_livp_path,
+    preview_path,
+    record_cache_assets,
+    thumbnail_path,
+    update_warm_job_progress,
+)
 
 # 刷新间隔（秒）
 REFRESH_INTERVAL = 3 * 60  # 3分钟
@@ -160,8 +173,8 @@ def parse_bypy_list(output):
     return files
 
 
-def get_download_url(filename):
-    """获取百度网盘下载直链"""
+def _get_download_url_once(filename):
+    """获取一次百度网盘下载直链"""
     token = get_access_token()
     if not token:
         return None, "未授权"
@@ -209,15 +222,73 @@ def get_download_url(filename):
         return None, str(e)
 
 
-def _download_to_file(url, dest_path, timeout=120):
+def get_download_url(filename):
+    error = "无法获取下载链接"
+    for attempt in range(3):
+        url, error = _get_download_url_once(filename)
+        if url:
+            return url, None
+        if attempt < 2:
+            time.sleep(0.5 * (attempt + 1))
+    return None, error
+
+
+def _get_thumbnail_url_once(filename):
+    token = get_access_token()
+    if not token:
+        return None
+    directory = quote(f"/apps/bypy{BAIDU_REMOTE_PATH}", safe="")
+    try:
+        list_url = (
+            "https://pan.baidu.com/rest/2.0/xpan/file?method=search"
+            f"&access_token={token}&dir={directory}&recursion=0&num=20"
+            f"&key={quote(filename, safe='')}"
+        )
+        files = requests.get(list_url, timeout=10).json().get("list", [])
+        target = next((item for item in files if item.get("server_filename") == filename), None)
+        if not target:
+            return None
+        meta_url = (
+            "https://pan.baidu.com/rest/2.0/xpan/file?method=filemetas"
+            f"&access_token={token}&fsids=[{target['fs_id']}]&thumb=1"
+        )
+        items = requests.get(meta_url, timeout=10).json().get("list", [])
+        thumbs = items[0].get("thumbs", {}) if items else {}
+        return thumbs.get("url3") or thumbs.get("url2") or thumbs.get("url1")
+    except Exception as error:
+        print(f"    ⚠️ 网盘缩略图不可用，回退原图: {error}")
+        return None
+
+
+def get_thumbnail_url(filename):
+    for attempt in range(3):
+        url = _get_thumbnail_url_once(filename)
+        if url:
+            return url
+        if attempt < 2:
+            time.sleep(0.5 * (attempt + 1))
+    return None
+
+
+def _download_to_file(url, dest_path, timeout=120, job_id=None):
     """流式下载文件到本地，避免把整个文件载入内存"""
     try:
         with requests.get(url, stream=True, timeout=timeout) as resp:
             resp.raise_for_status()
+            total = int(resp.headers.get("Content-Length", 0))
+            downloaded = 0
+            last_update = 0.0
             with open(dest_path, "wb") as f:
                 for chunk in resp.iter_content(chunk_size=65536):
                     if chunk:
                         f.write(chunk)
+                        downloaded += len(chunk)
+                        now = time.monotonic()
+                        if job_id and total and now - last_update >= 0.5:
+                            update_warm_job_progress(
+                                job_id, progress=round(downloaded / total * 100, 1), stage="下载",
+                            )
+                            last_update = now
         return True, None
     except Exception as e:
         print(f"    ❌ 下载失败: {e}")
@@ -230,6 +301,7 @@ def _download_to_file(url, dest_path, timeout=120):
 
 def generate_image_thumbnail(img, size):
     """生成图片缩略图"""
+    img = ImageOps.exif_transpose(img)
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
     img.thumbnail(size, Image.Resampling.LANCZOS)
@@ -297,22 +369,192 @@ def extract_livp_video(video_data, filename):
         return None
 
 
-def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
-    """
-    处理单个媒体文件（视频流式下载到磁盘，避免整文件进内存）
-    返回 (success, updated_info) 元组
-    """
+def _write_bytes_atomic(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.partial")
+    try:
+        with open(temp_path, "wb") as f:
+            f.write(data)
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def transcode_video(
+    source_path, output_path, job_id=None, on_first_play=None,
+    stop_after_first_play=False, abort_if=None,
+):
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = output_path.with_name(f".{output_path.name}.stream.mp4")
+    temp_output.unlink(missing_ok=True)
+    scale = "if(gt(iw,ih),min(iw,1280),-2)"
+    is_remote = str(source_path).startswith(("http://", "https://"))
+    source = "pipe:0" if is_remote else str(source_path)
+    command = [
+        "ffmpeg", "-y", "-analyzeduration", "1000000", "-probesize", "1000000",
+        "-i", source, "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", f"scale=w='{scale}':h='{scale}'",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27", "-g", "60", "-keyint_min", "30",
+        "-maxrate", "3M", "-bufsize", "6M", "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k",
+        "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+        "-progress", "pipe:1", "-nostats", str(temp_output),
+    ]
+    process = subprocess.Popen(
+        command, stdin=subprocess.PIPE if is_remote else None,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    process.stdout = io.TextIOWrapper(process.stdout, encoding="utf-8", errors="replace")
+    process.stderr = io.TextIOWrapper(process.stderr, encoding="utf-8", errors="replace")
+    duration = {"seconds": 0.0}
+    errors = []
+
+    def stream_remote_input():
+        try:
+            with requests.get(source_path, stream=True, timeout=(10, 30)) as response:
+                errors.append(f"输入响应: {response.status_code} {response.headers.get('Content-Type')}")
+                response.raise_for_status()
+                for chunk in response.iter_content(chunk_size=256 * 1024):
+                    if chunk:
+                        process.stdin.write(chunk)
+        except BrokenPipeError:
+            pass
+        except Exception as error:
+            errors.append(f"网盘输入失败: {error}")
+        finally:
+            try:
+                process.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+
+    input_thread = threading.Thread(target=stream_remote_input, daemon=True) if is_remote else None
+    if input_thread:
+        input_thread.start()
+
+    def read_errors():
+        for line in process.stderr:
+            if "Duration:" in line:
+                try:
+                    text = line.split("Duration:", 1)[1].split(",", 1)[0].strip()
+                    hours, minutes, seconds = text.split(":")
+                    duration["seconds"] = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+                except (ValueError, IndexError):
+                    pass
+            errors.append(line.strip())
+            del errors[:-12]
+
+    error_thread = threading.Thread(target=read_errors, daemon=True)
+    error_thread.start()
+    first_play = False
+    progress = 0.0
+    last_update = 0.0
+    if job_id:
+        update_warm_job_progress(job_id, progress=0, stage="转码", playback_ready=0)
+    try:
+        for line in process.stdout:
+            if abort_if and abort_if():
+                print("    ⏸️ 周期转码让位用户恢复请求")
+                process.terminate()
+                return False
+            if not line.startswith("out_time_ms="):
+                continue
+            try:
+                output_seconds = int(line.split("=", 1)[1]) / 1_000_000
+            except ValueError:
+                continue
+            now = time.monotonic()
+            if job_id and duration["seconds"] and now - last_update >= 0.5:
+                progress = min(99, round(output_seconds / duration["seconds"] * 100, 1))
+                update_warm_job_progress(job_id, progress=progress, stage="转码")
+                last_update = now
+            if not first_play and output_seconds >= 1.5 and temp_output.stat().st_size > 0:
+                first_play = True
+                if job_id:
+                    update_warm_job_progress(
+                        job_id, progress=progress if duration["seconds"] else None,
+                        stage="可边下边播", playback_ready=1,
+                    )
+                if on_first_play:
+                    on_first_play(temp_output)
+                if stop_after_first_play:
+                    process.terminate()
+        return_code = process.wait()
+        error_thread.join(timeout=2)
+        if stop_after_first_play and first_play:
+            return True
+        if return_code != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+            print(f"    ❌ 视频转码失败: {'; '.join(errors)[-1500:]}")
+            return False
+        if not first_play and on_first_play:
+            on_first_play(temp_output)
+        os.replace(temp_output, output_path)
+        if job_id:
+            update_warm_job_progress(job_id, progress=100, stage="完成", playback_ready=1)
+        return True
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            process.wait()
+        if not stop_after_first_play:
+            temp_output.unlink(missing_ok=True)
+
+
+def process_streaming_video(
+    file_info, thumbs_dir, previews_dir, videos_dir,
+    job_id=None, on_first_play=None, stop_after_first_play=False, abort_if=None,
+):
+    filename = file_info["name"]
+    safe_name = quote(filename, safe="")
+    output_name = safe_name if filename.lower().endswith(".mp4") else f"{safe_name}.mp4"
+    url, error = get_download_url(filename)
+    if error or not url:
+        return False, file_info
+
+    def first_play(partial_path):
+        for directory, size in ((thumbs_dir, (200, 200)), (previews_dir, (800, 800))):
+            data = generate_video_thumbnail(partial_path, size)
+            if data:
+                suffix = "_200x200.jpg" if size == (200, 200) else "_800x800.jpg"
+                _write_bytes_atomic(directory / f"{safe_name}{suffix}", data.getvalue())
+        if on_first_play:
+            on_first_play(partial_path)
+
+    success = transcode_video(
+        url, videos_dir / output_name, job_id=job_id,
+        on_first_play=first_play, stop_after_first_play=stop_after_first_play,
+        abort_if=abort_if,
+    )
+    if success:
+        file_info["processed"] = True
+        file_info["processed_at"] = datetime.now().isoformat()
+    return success, file_info
+
+
+def process_media_file(
+    file_info, thumbs_dir, previews_dir, videos_dir, include_video=True,
+    job_id=None, prefer_thumbnail=False, on_first_play=None,
+    stop_after_first_play=False, abort_if=None,
+):
+    """生成永久缩略图、预览图和可选的视频播放派生文件。"""
     filename = file_info["name"]
     ext = os.path.splitext(filename)[1].lower()
     is_video = ext in VIDEO_EXTS
 
     print(f"  处理: {filename}")
 
-    # 获取下载链接
-    url, error = get_download_url(filename)
-    if error or not url:
-        print(f"    ❌ 无法获取下载链接: {error}")
-        return False, file_info
+    url = None
+    if prefer_thumbnail and not is_video:
+        url = get_thumbnail_url(filename)
+    if not url:
+        url, error = get_download_url(filename)
+        if error or not url:
+            print(f"    ❌ 无法获取下载链接: {error}")
+            return False, file_info
+    if is_video and include_video and ext in (".mp4", ".mov") and file_info.get("size", 0) >= 5 * 1024**2:
+        return process_streaming_video(
+            file_info, thumbs_dir, previews_dir, videos_dir, job_id,
+            on_first_play, stop_after_first_play, abort_if,
+        )
 
     temp_dir = CACHE_DIR / "temp_video"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -322,7 +564,7 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
 
     try:
         # 流式下载原始文件（视频不会进入内存）
-        ok, err = _download_to_file(url, temp_original)
+        ok, err = _download_to_file(url, temp_original, job_id=job_id)
         if not ok:
             return False, file_info
 
@@ -367,14 +609,12 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
                 thumb_data = generate_image_thumbnail(img, (200, 200))
 
         if thumb_data:
-            with open(thumb_path, "wb") as f:
-                f.write(thumb_data.getvalue())
+            _write_bytes_atomic(thumb_path, thumb_data.getvalue())
             print(f"    ✓ 缩略图已生成")
         else:
             print(f"    ❌ 缩略图生成失败")
             return False, file_info
 
-        # 生成预览图 (800x800)
         preview_path = previews_dir / f"{safe_name}_800x800.jpg"
         if is_video:
             preview_data = generate_video_thumbnail(temp_video, (800, 800))
@@ -383,25 +623,32 @@ def process_media_file(file_info, thumbs_dir, previews_dir, videos_dir):
                 preview_data = generate_image_thumbnail(img, (800, 800))
 
         if preview_data:
-            with open(preview_path, "wb") as f:
-                f.write(preview_data.getvalue())
+            _write_bytes_atomic(preview_path, preview_data.getvalue())
             print(f"    ✓ 预览图已生成")
         else:
             print(f"    ❌ 预览图生成失败")
             return False, file_info
 
-        # 缓存视频文件到本地（供前端播放，避免 CORS）
-        if ext == ".livp":
-            video_cache_path = videos_dir / f"{safe_name}.mov"
-            shutil.move(str(temp_video), str(video_cache_path))
-            print(f"    ✓ 视频已提取")
-        elif ext in (".mov", ".mp4"):
-            video_cache_path = videos_dir / f"{safe_name}"
-            shutil.move(str(temp_original), str(video_cache_path))
-            print(f"    ✓ 视频已缓存")
+        if is_video and include_video:
+            output_name = safe_name if ext == ".mp4" else f"{safe_name}.mp4"
+            video_cache_path = videos_dir / output_name
+            if not transcode_video(
+                temp_video, video_cache_path, job_id=job_id,
+                on_first_play=on_first_play,
+                stop_after_first_play=stop_after_first_play,
+                abort_if=abort_if,
+            ):
+                return False, file_info
+            if ext == ".livp":
+                (videos_dir / f"{safe_name}.mov").unlink(missing_ok=True)
+            elif ext == ".mov":
+                (videos_dir / safe_name).unlink(missing_ok=True)
+            print(f"    ✓ 视频已压缩缓存")
 
         file_info["processed"] = True
         file_info["processed_at"] = datetime.now().isoformat()
+        if on_first_play and not is_video:
+            on_first_play(preview_path)
         print(f"    ✓ 处理完成")
         return True, file_info
 
@@ -463,60 +710,45 @@ def refresh_media():
         updated_count = 0
         failed_count = 0
         current_names = set()
+        hot_cutoff = datetime.fromtimestamp(time.time() - 30 * 86400).date().isoformat()
 
         for file_info in media_files:
+            if has_queued_warm_job():
+                process_one_warm_job()
             filename = file_info["name"]
             ext = os.path.splitext(filename)[1].lower()
             md5 = file_info.get("md5", "")
             current_names.add(filename)
 
-            # 检查数据库中是否已存在且未改变
             cursor = db.execute(
                 "SELECT md5, processed FROM media_files WHERE filename = ?", (filename,)
             )
             existing = cursor.fetchone()
 
             if existing and existing["md5"] == md5 and existing["processed"]:
-                # 文件未改变且已处理，检查缓存文件是否完整
-                need_reprocess = False
+                if thumbnail_path(filename, CACHE_DIR).is_file():
+                    is_hot = file_info["date"] >= hot_cutoff
+                    preview_ready = preview_path(filename, CACHE_DIR).is_file()
+                    video_ready = ext not in VIDEO_EXTS or existing_video_path(filename, CACHE_DIR)
+                    if not is_hot or (preview_ready and video_ready):
+                        record_cache_assets(filename)
+                        continue
+                else:
+                    print(f"  ⚠️ {filename} 的永久缩略图缺失，需要重新处理")
 
-                # 检查缩略图是否存在
-                thumb_path = thumbs_dir / f"{quote(filename, safe='')}_200x200.jpg"
-                if not thumb_path.exists():
-                    print(f"  ⚠️ {filename} 的缩略图缺失，需要重新处理")
-                    need_reprocess = True
-
-                # 检查预览图是否存在
-                preview_path = previews_dir / f"{quote(filename, safe='')}_800x800.jpg"
-                if not preview_path.exists():
-                    print(f"  ⚠️ {filename} 的预览图缺失，需要重新处理")
-                    need_reprocess = True
-
-                # 检查视频缓存（视频文件需要检查视频缓存）
-                if not need_reprocess:
-                    if filename.lower().endswith(".livp"):
-                        video_path = videos_dir / f"{quote(filename, safe='')}.mov"
-                        if not video_path.exists():
-                            print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
-                            need_reprocess = True
-                    elif ext in (".mov", ".mp4"):
-                        video_path = videos_dir / f"{quote(filename, safe='')}"
-                        if not video_path.exists():
-                            print(f"  ⚠️ {filename} 的视频缓存缺失，需要重新处理")
-                            need_reprocess = True
-
-                if not need_reprocess:
-                    continue
-
-            # 需要处理这个文件
             success, updated_info = process_media_file(
-                file_info, thumbs_dir, previews_dir, videos_dir
+                file_info,
+                thumbs_dir,
+                previews_dir,
+                videos_dir,
+                include_video=ext not in VIDEO_EXTS or file_info["date"] >= hot_cutoff,
+                abort_if=has_queued_warm_job,
             )
 
             if success:
-                # 更新数据库（使用事务）
                 update_media_file(db, updated_info)
                 db.commit()
+                record_cache_assets(filename)
 
                 if existing is None:
                     new_count += 1
@@ -555,141 +787,153 @@ def refresh_media():
 
 
 def repair_media_database():
-    """修复数据库与本地缓存之间的不一致（磁盘满等导致的半成品）"""
-    print("\n" + "=" * 60)
-    print("🔧 开始修复数据库与缓存一致性")
-    print("=" * 60)
-
+    """修复永久缩略图与媒体记录的一致性，不把冷缓存误判为未处理。"""
     db = get_standalone_db()
+    reset_count = 0
+    set_processed_count = 0
+    cleaned_bytes = 0
     try:
-        thumbs_dir = CACHE_DIR / "thumbs"
-        previews_dir = CACHE_DIR / "previews"
-        videos_dir = CACHE_DIR / "videos"
-        for d in (thumbs_dir, previews_dir, videos_dir):
-            d.mkdir(exist_ok=True)
-
-        cursor = db.execute(
-            "SELECT filename, file_type, processed "
-            "FROM media_files ORDER BY date DESC, time DESC"
-        )
-        rows = cursor.fetchall()
-
-        reset_count = 0
-        set_processed_count = 0
-        cleaned_bytes = 0
-
+        rows = db.execute("SELECT filename, processed FROM media_files").fetchall()
         for row in rows:
             filename = row["filename"]
-            ext = os.path.splitext(filename)[1].lower()
-            safe_name = quote(filename, safe="")
-            is_video = ext in VIDEO_EXTS
-
-            thumb_path = thumbs_dir / f"{safe_name}_200x200.jpg"
-            preview_path = previews_dir / f"{safe_name}_800x800.jpg"
-
-            required = [thumb_path, preview_path]
-            if is_video:
-                if ext == ".livp":
-                    video_path = videos_dir / f"{safe_name}.mov"
-                elif ext in (".mov", ".mp4"):
-                    video_path = videos_dir / f"{safe_name}"
-                else:
-                    video_path = None
-                if video_path:
-                    required.append(video_path)
-
-            missing_or_empty = []
-            for p in required:
-                if not p.exists() or p.stat().st_size == 0:
-                    missing_or_empty.append(p.name)
-
-            if missing_or_empty:
-                if row["processed"]:
-                    db.execute(
-                        "UPDATE media_files SET processed = 0, processed_at = NULL, "
-                        "updated_at = CURRENT_TIMESTAMP WHERE filename = ?",
-                        (filename,),
-                    )
-                    reset_count += 1
-                    print(
-                        f"  已重置为未处理: {filename} "
-                        f"(缺失: {', '.join(missing_or_empty)})"
-                    )
-                    # 清理已存在的半成品/空文件，保留完整的缓存
-                    for p in required:
-                        if p.exists() and (
-                            p.name in missing_or_empty or p.stat().st_size == 0
-                        ):
-                            try:
-                                cleaned_bytes += p.stat().st_size
-                                p.unlink()
-                            except OSError:
-                                pass
-            else:
-                if not row["processed"]:
-                    db.execute(
-                        "UPDATE media_files SET processed = 1, "
-                        "processed_at = CURRENT_TIMESTAMP, "
-                        "updated_at = CURRENT_TIMESTAMP WHERE filename = ?",
-                        (filename,),
-                    )
-                    set_processed_count += 1
-                    print(f"  补标记为已处理: {filename}")
-
+            thumb = thumbnail_path(filename, CACHE_DIR)
+            thumb_ready = thumb.is_file() and thumb.stat().st_size > 0
+            if thumb_ready and not row["processed"]:
+                db.execute(
+                    "UPDATE media_files SET processed = 1, "
+                    "processed_at = CURRENT_TIMESTAMP WHERE filename = ?",
+                    (filename,),
+                )
+                set_processed_count += 1
+            elif not thumb_ready and row["processed"]:
+                db.execute(
+                    "UPDATE media_files SET processed = 0, processed_at = NULL "
+                    "WHERE filename = ?",
+                    (filename,),
+                )
+                thumb.unlink(missing_ok=True)
+                reset_count += 1
         db.commit()
 
-        # 清理 temp_video 中的残留临时文件
         temp_dir = CACHE_DIR / "temp_video"
         if temp_dir.exists():
-            for p in temp_dir.iterdir():
-                try:
-                    cleaned_bytes += p.stat().st_size
-                    p.unlink()
-                except OSError:
-                    pass
-
-        print("=" * 60)
+            for path in temp_dir.iterdir():
+                if path.is_file():
+                    cleaned_bytes += path.stat().st_size
+                    path.unlink(missing_ok=True)
         print(
-            f"✅ 修复完成: 重置 {reset_count} 条, "
-            f"补标记 {set_processed_count} 条, "
+            f"修复完成: 重置 {reset_count} 条，补标记 {set_processed_count} 条，"
             f"清理 {cleaned_bytes / 1024 / 1024:.2f} MB"
         )
-        print("=" * 60 + "\n")
     finally:
         db.close()
 
 
-def main():
-    """主循环"""
-    print("\n" + "=" * 60)
-    print("🚀 媒体刷新服务启动")
-    print(f"⏱️  刷新间隔: {REFRESH_INTERVAL // 60} 分钟")
-    print(f"🗄️  数据库: {DATA_DIR / 'babysit.db'}")
-    print(f"☁️  网盘路径: {BAIDU_REMOTE_PATH}")
-    print("=" * 60 + "\n")
-
-    # 立即执行一次
+def process_original_livp(file_info):
+    filename = file_info["name"]
+    url, error = get_download_url(filename)
+    if error or not url:
+        return False
+    temp_dir = CACHE_DIR / "temp_video"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    source = temp_dir / f"original-{quote(filename, safe='')}"
+    output = original_livp_path(filename)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temp_output = output.with_name(f".{output.name}.partial")
     try:
-        refresh_media()
-    except Exception as e:
-        print(f"❌ 首次刷新失败: {e}")
-        import traceback
+        success, _ = _download_to_file(url, source)
+        if not success:
+            return False
+        with zipfile.ZipFile(source) as archive:
+            mov_name = next((name for name in archive.namelist() if name.lower().endswith(".mov")), None)
+            if not mov_name:
+                return False
+            with archive.open(mov_name) as src, open(temp_output, "wb") as dst:
+                while True:
+                    chunk = src.read(256 * 1024)
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+        os.replace(temp_output, output)
+        return True
+    except (OSError, zipfile.BadZipFile) as error:
+        print(f"    ❌ Live Photo 原件解包失败: {error}")
+        return False
+    finally:
+        source.unlink(missing_ok=True)
+        temp_output.unlink(missing_ok=True)
 
-        traceback.print_exc()
 
-    # 定时循环
-    while True:
-        print(f"💤 等待 {REFRESH_INTERVAL // 60} 分钟后下次刷新...")
-        time.sleep(REFRESH_INTERVAL)
-
+def process_one_warm_job():
+    job = claim_next_warm_job()
+    if not job:
+        return False
+    db = get_standalone_db()
+    try:
+        row = db.execute(
+            "SELECT * FROM media_files WHERE filename = ? AND processed = 1",
+            (job["filename"],),
+        ).fetchone()
+    finally:
+        db.close()
+    if not row:
+        finish_warm_job(job["id"], "媒体已不存在")
+        return True
+    file_info = {
+        "name": row["filename"],
+        "type": row["file_type"],
+        "size": row["file_size"],
+        "md5": row["md5"],
+        "date": row["date"],
+        "time": row["time"] or "",
+        "baidu_date": row["baidu_date"] or "",
+        "processed": True,
+    }
+    if job["kind"] == "original_livp":
         try:
-            refresh_media()
-        except Exception as e:
-            print(f"❌ 刷新失败: {e}")
-            import traceback
+            if not process_original_livp(file_info):
+                raise RuntimeError("Live Photo 原件下载或解包失败")
+            finish_warm_job(job["id"])
+        except Exception as error:
+            finish_warm_job(job["id"], str(error))
+        return True
+    try:
+        required = row["file_size"] or 0 if job["kind"] == "video" else 0
+        budget = enforce_cache_budget(required_bytes=required)
+        if not budget["within_budget"]:
+            raise RuntimeError("热数据已超过缓存容量，无法继续恢复")
+        success, _ = process_media_file(
+            file_info,
+            CACHE_DIR / "thumbs",
+            CACHE_DIR / "previews",
+            CACHE_DIR / "videos",
+            include_video=job["kind"] == "video",
+            job_id=job["id"],
+            prefer_thumbnail=False,
+        )
+        if not success:
+            raise RuntimeError("网盘下载或媒体处理失败")
+        record_cache_assets(job["filename"])
+        finish_warm_job(job["id"])
+    except Exception as error:
+        finish_warm_job(job["id"], str(error))
+    return True
 
-            traceback.print_exc()
-            print("   将在下次循环重试...")
+
+def main():
+    print("媒体刷新与缓存恢复服务启动")
+    init_media_cache()
+    next_refresh = 0
+    while True:
+        if time.time() >= next_refresh:
+            try:
+                refresh_media()
+                enforce_cache_budget()
+            except Exception as error:
+                print(f"刷新失败: {error}")
+            next_refresh = time.time() + REFRESH_INTERVAL
+        if not process_one_warm_job():
+            time.sleep(0.5)
 
 
 if __name__ == "__main__":

@@ -45,6 +45,25 @@ async function startMockServer(videoPath) {
       ]
     }
   }
+  const allMedia = () => Object.values(albums).flatMap(groups => Object.values(groups).flat())
+  allMedia().forEach(item => {
+    item.preview_ready = true
+    item.video_ready = item.type === 'video' ? true : null
+  })
+  state.recovery = {}
+  state.delays = {}
+  state.progress = {}
+  const mediaStatus = item => ({
+    filename: item.name,
+    type: item.type,
+    state: state.recovery[item.name] || ((item.type === 'video' ? item.video_ready : item.preview_ready) ? 'ready' : 'cold'),
+    preview_ready: item.preview_ready,
+    video_ready: item.video_ready,
+    job: {
+      progress: state.progress[item.name] || null,
+      stage: state.recovery[item.name] === 'streaming' ? '可边下边播' : (item.type === 'video' ? '转码' : '下载')
+    }
+  })
   let nextGrowthId = 10
   let nextMilestoneId = 10
 
@@ -105,11 +124,63 @@ async function startMockServer(videoPath) {
     }
     const albumMatch = pathname.match(/^\/api\/album\/(\d+)\/(\d+)$/)
     if (albumMatch) return json(albums[`${Number(albumMatch[1])}-${Number(albumMatch[2])}`] || {})
+    if (pathname === '/api/test/media' && request.method === 'POST') {
+      readJson(request, data => {
+        const item = allMedia().find(media => media.name === data.name)
+        if (!item) return response.writeHead(404).end(JSON.stringify({ error: 'not found' }))
+        if ('preview_ready' in data) item.preview_ready = data.preview_ready
+        if ('video_ready' in data) item.video_ready = data.video_ready
+        if (data.delay) state.delays[item.name] = data.delay
+        delete state.recovery[item.name]
+        json({ ok: true })
+      })
+      return
+    }
+    const statusMatch = pathname.match(/^\/api\/media\/status\/(.+)$/)
+    if (statusMatch) {
+      const item = allMedia().find(media => media.name === statusMatch[1])
+      return item ? json(mediaStatus(item)) : response.writeHead(404).end(JSON.stringify({ error: 'not found' }))
+    }
+    if (pathname === '/api/media/warm' && request.method === 'POST') {
+      readJson(request, data => {
+        const item = allMedia().find(media => media.name === data.filename)
+        if (!item) return response.writeHead(404).end(JSON.stringify({ error: 'not found' }))
+        if (data.include_current) {
+          state.recovery[item.name] = 'processing'
+          state.progress[item.name] = 5
+          if (item.type === 'video') {
+            setTimeout(() => {
+              state.recovery[item.name] = 'streaming'
+              state.progress[item.name] = 20
+            }, 500)
+            setTimeout(() => { state.progress[item.name] = 65 }, 1000)
+          }
+          setTimeout(() => {
+            item.preview_ready = true
+            if (item.type === 'video') item.video_ready = true
+            state.recovery[item.name] = 'ready'
+            state.progress[item.name] = 100
+          }, state.delays[item.name] || 1200)
+        }
+        response.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ current: mediaStatus(item) }))
+      })
+      return
+    }
     if (pathname.startsWith('/thumb/') || pathname.startsWith('/preview/') || pathname.startsWith('/api/download/')) {
+      const name = pathname.slice(pathname.lastIndexOf('/') + 1)
+      const item = allMedia().find(media => media.name === name)
+      if (pathname.startsWith('/preview/') && item && !item.preview_ready) {
+        return response.writeHead(404).end(JSON.stringify({ error: 'CACHE_COLD' }))
+      }
       response.writeHead(200, { 'Content-Type': 'image/png' }).end(png)
       return
     }
     if ((pathname.startsWith('/video/') || pathname.startsWith('/livp/')) && videoPath) {
+      const name = pathname.slice(pathname.lastIndexOf('/') + 1)
+      const item = allMedia().find(media => media.name === name)
+      if (item && !item.video_ready && state.recovery[item.name] !== 'streaming') {
+        return response.writeHead(404).end(JSON.stringify({ error: 'CACHE_COLD' }))
+      }
       const fs = require('node:fs')
       response.writeHead(200, { 'Content-Type': 'video/mp4' })
       fs.createReadStream(videoPath).pipe(response)
@@ -119,7 +190,7 @@ async function startMockServer(videoPath) {
   })
 
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  return { server, state, port: server.address().port, current, previous }
+  return { server, state, albums, port: server.address().port, current, previous }
 }
 
 function readJson(request, callback) {

@@ -40,7 +40,6 @@ const growthVisible = ref(false)
 const growthType = ref('height')
 const currentTab = ref('growth')
 const sharedMedia = ref(null)
-
 onShareAppMessage(() => {
   if (!sharedMedia.value) return { title: '宝宝成长日志', path: '/pages/index/index' }
   return {
@@ -91,14 +90,10 @@ function showRecordOptions() {
 }
 
 function openMedia(index) {
-  // #ifdef MP-WEIXIN
   uni.previewMedia({
     ...nativePreviewOptions(store.media, index),
-    fail: () => uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
+    fail: () => uni.showToast({ title: '媒体暂时无法播放，请重试', icon: 'none' })
   })
-  return
-  // #endif
-  uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
 }
 
 async function openMilestone(item) {
@@ -134,4 +129,5 @@ async function openMilestone(item) {
 .retry-button {
   margin-top: 28rpx;
 }
+
 </style>

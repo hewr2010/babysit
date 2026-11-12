@@ -7,6 +7,7 @@ babysit - 宝宝成长管家 (Vue3版)
 
 import io
 import os
+import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, quote
@@ -21,6 +22,17 @@ from .db import (init_db, close_db, get_baby, add_baby,
                  get_all_milestones, get_milestones_by_filename, add_milestone, delete_milestone)
 from .utils import calculate_age
 from .baidu import get_file_info, run_bypy
+from .media_cache import (
+    enqueue_original_livp,
+    enqueue_warm,
+    existing_video_path,
+    get_media_status,
+    get_original_livp_status,
+    init_media_cache,
+    original_livp_path,
+    partial_video_path,
+    touch_media_access,
+)
 
 # Vue3 frontend dist directory
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
@@ -35,6 +47,7 @@ def create_app():
 
     app.teardown_appcontext(close_db)
     init_db()
+    init_media_cache()
 
     @app.route("/")
     def index():
@@ -123,86 +136,128 @@ def create_app():
         """获取某月已预处理的媒体文件"""
         return jsonify(get_processed_media_by_month(year, month))
 
-    # ===== 缩略图（从缓存读取，已预生成）=====
+    @app.route("/api/media/status/<path:filename>")
+    def api_media_status(filename):
+        return jsonify(get_media_status(filename))
+
+    @app.route("/api/media/warm", methods=["POST"])
+    def api_media_warm():
+        data = request.get_json(silent=True) or {}
+        filename = data.get("filename", "")
+        neighbors = data.get("neighbors", [])
+        client_id = data.get("client_id", "")[:80]
+        if not filename or not client_id:
+            return jsonify({"error": "filename 和 client_id 是必填项"}), 400
+        if not isinstance(neighbors, list) or len(neighbors) > 4:
+            return jsonify({"error": "neighbors 最多包含 4 个文件"}), 400
+        from .db import get_db
+
+        names = [filename, *neighbors]
+        placeholders = ",".join("?" for _ in names)
+        rows = get_db().execute(
+            f"SELECT filename FROM media_files WHERE processed = 1 "
+            f"AND filename IN ({placeholders})",
+            names,
+        ).fetchall()
+        known_names = {row["filename"] for row in rows}
+        if filename not in known_names:
+            return jsonify({"error": "媒体不存在或尚未完成首次处理"}), 404
+        neighbors = [name for name in neighbors if name in known_names]
+        status = enqueue_warm(
+            filename,
+            client_id,
+            neighbors,
+            generation=max(0, int(data.get("generation", 0))),
+            include_current=bool(data.get("include_current", True)),
+            include_neighbor_videos=bool(data.get("include_neighbor_videos", False)),
+        )
+        return jsonify({"current": status, "neighbors": neighbors}), (
+            200 if status["state"] == "ready" else 202
+        )
+
     @app.route("/thumb/<path:filename>")
     def thumbnail(filename):
-        """获取缩略图 (200x200) - 从缓存读取"""
-        try:
-            filename = unquote(filename)
-        except:
-            pass
-
-        cache_key = f"{quote(filename, safe='')}_200x200.jpg"
-        cache_file = CACHE_DIR / "thumbs" / cache_key
-
+        cache_file = CACHE_DIR / "thumbs" / f"{quote(filename, safe='')}_200x200.jpg"
         if cache_file.exists():
-            return send_file(cache_file, mimetype='image/jpeg')
-
-        # 如果缓存不存在，返回占位图
+            return send_file(cache_file, mimetype="image/jpeg")
         placeholder = io.BytesIO()
-        Image.new('RGB', (200, 200), color='#ffc0cb').save(placeholder, format='JPEG')
+        Image.new("RGB", (200, 200), color="#ffc0cb").save(placeholder, format="JPEG")
         placeholder.seek(0)
-        return send_file(placeholder, mimetype='image/jpeg')
+        return send_file(placeholder, mimetype="image/jpeg")
+
+    def recover_cold_media(filename):
+        from .db import get_db
+
+        rows = get_db().execute(
+            "SELECT filename FROM media_files WHERE processed = 1 "
+            "ORDER BY date DESC, time DESC"
+        ).fetchall()
+        names = [row["filename"] for row in rows]
+        if filename not in names:
+            raise FileNotFoundError(filename)
+        index = names.index(filename)
+        neighbor_indexes = [index - 2, index - 1, index + 1, index + 2]
+        neighbors = [names[i] for i in neighbor_indexes if 0 <= i < len(names)]
+        enqueue_warm(
+            filename,
+            "native-preview",
+            neighbors,
+            generation=time.time_ns(),
+            include_neighbor_videos=True,
+        )
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            status = get_media_status(filename)
+            if status["state"] in ("ready", "streaming"):
+                return status
+            if status["state"] == "error":
+                raise RuntimeError((status.get("job") or {}).get("error") or "媒体恢复失败")
+            time.sleep(0.1)
+        raise TimeoutError("媒体恢复超时，请重试")
 
     @app.route("/preview/<path:filename>")
     def preview(filename):
-        """获取中等质量预览图 (800x800) - 从缓存读取"""
-        try:
-            filename = unquote(filename)
-        except:
-            pass
-
-        cache_key = f"{quote(filename, safe='')}_800x800.jpg"
-        cache_file = CACHE_DIR / "previews" / cache_key
-
+        cache_file = CACHE_DIR / "previews" / f"{quote(filename, safe='')}_800x800.jpg"
+        if not cache_file.exists():
+            try:
+                recover_cold_media(filename)
+            except (TimeoutError, RuntimeError) as error:
+                return jsonify({"error": "RECOVERY_FAILED", "message": str(error)}), 503
+            except FileNotFoundError:
+                return jsonify({"error": "媒体不存在"}), 404
         if cache_file.exists():
-            return send_file(cache_file, mimetype='image/jpeg')
+            touch_media_access(filename, "preview")
+            return send_file(cache_file, mimetype="image/jpeg")
+        return jsonify({"error": "RECOVERY_FAILED", "message": "预览恢复失败"}), 503
 
-        # 如果缓存不存在，返回占位图
-        placeholder = io.BytesIO()
-        Image.new('RGB', (400, 400), color='#ffc0cb').save(placeholder, format='JPEG')
-        placeholder.seek(0)
-        return send_file(placeholder, mimetype='image/jpeg')
+    def serve_cached_video(filename):
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in (".mov", ".mp4", ".livp"):
+            return jsonify({"error": "不支持的视频格式"}), 400
+        cache_file = existing_video_path(filename)
+        if not cache_file:
+            try:
+                recover_cold_media(filename)
+            except (TimeoutError, RuntimeError) as error:
+                return jsonify({"error": "RECOVERY_FAILED", "message": str(error)}), 503
+            except FileNotFoundError:
+                return jsonify({"error": "媒体不存在"}), 404
+            cache_file = existing_video_path(filename)
+        if not cache_file and get_media_status(filename)["state"] == "streaming":
+            cache_file = partial_video_path(filename)
+        if not cache_file:
+            return jsonify({"error": "RECOVERY_FAILED", "message": "视频恢复失败"}), 503
+        touch_media_access(filename, "video")
+        mimetype = "video/mp4" if cache_file.suffix.lower() == ".mp4" else "video/quicktime"
+        return send_file(cache_file, mimetype=mimetype, conditional=True)
 
     @app.route("/livp/<path:filename>")
     def livp_video(filename):
-        """从已预提取的 .livp 视频中获取"""
-        try:
-            filename = unquote(filename)
-        except:
-            pass
-
-        cache_key = f"{quote(filename, safe='')}.mov"
-        cache_file = CACHE_DIR / "videos" / cache_key
-
-        if cache_file.exists():
-            return send_file(cache_file, mimetype='video/quicktime')
-
-        return jsonify({"error": "视频未预处理完成"}), 404
+        return serve_cached_video(filename)
 
     @app.route("/video/<path:filename>")
     def video_proxy(filename):
-        """获取视频文件（从本地缓存，避免 CORS 问题）"""
-        try:
-            filename = unquote(filename)
-        except:
-            pass
-
-        # 验证文件类型
-        ext = os.path.splitext(filename)[1].lower()
-        if ext not in ('.mov', '.mp4'):
-            return jsonify({"error": "不支持的视频格式"}), 400
-
-        # 首先尝试从本地缓存读取
-        cache_key = quote(filename, safe='')
-        cache_file = CACHE_DIR / "videos" / cache_key
-
-        if cache_file.exists():
-            mimetype = 'video/quicktime' if ext == '.mov' else 'video/mp4'
-            return send_file(cache_file, mimetype=mimetype)
-
-        # 缓存不存在，返回 404（让 refresh_media 去下载）
-        return jsonify({"error": "视频未缓存，请等待后台处理"}), 404
+        return serve_cached_video(filename)
 
     # ===== 原文件下载（服务器流式代理，不落盘）=====
     MAX_DOWNLOAD_SIZE = 50 * 1024 * 1024  # 50MB
@@ -242,101 +297,27 @@ def create_app():
         return stream_proxy_download(filename, file_size)
 
     def download_livp_video(filename, file_size):
-        """从 livp 中提取 mov 视频并流式返回"""
-        from .baidu import get_download_url
-        import requests
-        import zipfile
-
-        download_url, error = get_download_url(filename)
-        if error or not download_url:
-            return jsonify({"error": "无法获取下载链接", "details": error}), 500
-
-        temp_livp_path = None
-
-        try:
-            # 流式下载 livp 到临时文件（避免内存溢出）
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.livp') as temp_livp:
-                temp_livp_path = temp_livp.name
-
-                headers = {
-                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                }
-
-                with requests.get(download_url, stream=True, headers=headers, timeout=120) as resp:
-                    if resp.status_code != 200:
-                        return jsonify({"error": f"下载失败: {resp.status_code}"}), 500
-
-                    # 流式写入临时文件
-                    for chunk in resp.iter_content(chunk_size=65536):
-                        if chunk:
-                            temp_livp.write(chunk)
-
-            # 打开 zip 文件并保持引用
-            z = zipfile.ZipFile(temp_livp_path, 'r')
-
-            # 找到 mov 文件
-            mov_name = None
-            for name in z.namelist():
-                if name.lower().endswith('.mov'):
-                    mov_name = name
-                    break
-
-            if not mov_name:
-                z.close()
-                os.unlink(temp_livp_path)
-                return jsonify({"error": "livp 中未找到视频"}), 500
-
-            # 获取 mov 文件信息
-            mov_info = z.getinfo(mov_name)
-            mov_size = mov_info.file_size
-
-            # 构造下载文件名
-            download_name = filename.replace('.livp', '.mov')
-
-            # 流式返回 mov 文件 - 使用闭包保持文件引用
-            mov_file = z.open(mov_name)
-
-            def generate_mov():
-                try:
-                    while True:
-                        chunk = mov_file.read(65536)
-                        if not chunk:
-                            break
-                        yield chunk
-                finally:
-                    # 清理资源
-                    try:
-                        mov_file.close()
-                    except:
-                        pass
-                    try:
-                        z.close()
-                    except:
-                        pass
-                    try:
-                        if temp_livp_path:
-                            os.unlink(temp_livp_path)
-                    except:
-                        pass
-
-            return Response(
-                generate_mov(),
-                mimetype='video/quicktime',
-                headers={
-                    'Content-Disposition': f'attachment; filename="{download_name}"',
-                    'Content-Length': str(mov_size)
-                }
-            )
-
-        except Exception as e:
-            # 清理资源
-            try:
-                if temp_livp_path:
-                    os.unlink(temp_livp_path)
-            except:
-                pass
-            return jsonify({"error": f"提取视频失败: {str(e)}"}), 500
+        enqueue_original_livp(filename)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            status = get_original_livp_status(filename)
+            if status["state"] == "error":
+                return jsonify({"error": "Live Photo 原件解包失败"}), 503
+            if status["state"] == "ready":
+                break
+            time.sleep(0.1)
+        original = original_livp_path(filename)
+        if not original.exists():
+            return jsonify({"error": "Live Photo 原件准备超时，请重试"}), 503
+        response = send_file(
+            original,
+            mimetype="video/quicktime",
+            as_attachment=True,
+            download_name=filename.replace(".livp", ".mov"),
+            conditional=True,
+        )
+        response.call_on_close(lambda: original.unlink(missing_ok=True))
+        return response
 
     def stream_proxy_download(filename, file_size):
         """普通文件的流式代理下载"""
