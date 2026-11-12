@@ -2,8 +2,9 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 
-async function importSource(relativePath) {
-  const source = fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8')
+async function importSource(relativePath, replacement = null) {
+  let source = fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8')
+  if (replacement) source = source.replace(replacement.from, replacement.to)
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
 }
 
@@ -49,7 +50,30 @@ async function run() {
   assert.equal(growth.gramsToKilograms(4250), 4.25)
   assert.equal(growth.formatKilograms(4200), '4.2')
   assert.equal(growth.formatKilograms(4000), '4')
-  console.log('Unit tests passed: dates, album helpers, media share paths and weight conversion.')
+
+  global.uni = {
+    values: {},
+    getStorageSync(key) { return this.values[key] || '' },
+    setStorageSync(key, value) { this.values[key] = value },
+    removeStorageSync(key) { delete this.values[key] }
+  }
+  const auth = await importSource('../src/services/auth.js', {
+    from: "import { AUTH_KEY } from '@/config'",
+    to: "const AUTH_KEY = 'baby_auth_verified'"
+  })
+  global.getCurrentPages = () => [{ route: 'pages/index/index', options: {} }]
+  let loginRedirects = 0
+  uni.reLaunch = () => { loginRedirects += 1 }
+  uni.values.baby_auth_verified = 'true'
+  assert.equal(auth.requireAuth(), true)
+  assert.equal(loginRedirects, 0)
+  delete uni.values.baby_auth_verified
+  assert.equal(auth.isVerified(), false)
+  assert.equal(auth.verifyName('错误姓名'), false)
+  assert.equal(auth.verifyName('何与青'), true)
+  assert.equal(uni.values.baby_auth_verified, 'true')
+  assert.equal(auth.isVerified(), true)
+  console.log('Unit tests passed: dates, album helpers, media share paths, weight conversion and persistent auth.')
 }
 
 run().catch(error => {
