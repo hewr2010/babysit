@@ -328,7 +328,7 @@ def test_cold_preview_request_recovers_on_backend(media_env, monkeypatch):
     assert calls[0][0] == "cold.jpg"
     assert calls[0][1] == "native-preview"
     assert calls[0][2] == ["neighbor.jpg"]
-    assert calls[0][3]["include_neighbor_videos"] is True
+    assert calls[0][3]["include_neighbor_videos"] is False
 
 
 def test_missing_thumbnail_is_not_ready_even_with_preview(media_env):
@@ -369,6 +369,59 @@ def test_cold_thumbnail_request_recovers_real_image(media_env, monkeypatch):
 
     assert response.status_code == 200
     assert response.data == b"real-thumbnail"
+
+
+def test_thumbnail_can_be_generated_from_existing_preview(media_env):
+    import babysit.refresh_media as refresh
+    from PIL import Image
+
+    db_path, cache_dir = media_env
+    preview_path("video.mp4").parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (800, 600), "#336699").save(preview_path("video.mp4"), "JPEG")
+    assert refresh.process_preview_from_existing("video.mp4") is True
+    with Image.open(thumbnail_path("video.mp4")) as thumbnail:
+        assert max(thumbnail.size) <= 200
+
+
+def test_invalid_video_is_not_used_for_preview(media_env):
+    import babysit.refresh_media as refresh
+
+    db_path, cache_dir = media_env
+    video_output_path("broken.mp4").write_bytes(b"not-a-real-video")
+    assert refresh.video_file_is_valid(video_output_path("broken.mp4")) is False
+    assert refresh.process_preview_from_existing("broken.mp4") is False
+
+
+def test_video_with_cache_but_missing_thumbnail_uses_preview_job(media_env, monkeypatch):
+    import babysit.app as app_module
+
+    db_path, cache_dir = media_env
+    add_media(db_path, "video.mp4", "video")
+    video_output_path("video.mp4").write_bytes(b"full-video")
+    thumbnail_path("video.mp4").unlink()
+    monkeypatch.setattr(app_module, "CACHE_DIR", cache_dir)
+    client = app_module.create_app().test_client()
+    kinds = []
+
+    def recover(filename, client_id, neighbors, **kwargs):
+        kinds.append(kwargs["current_kind"])
+        result = enqueue_warm(
+            filename,
+            client_id,
+            neighbors,
+            generation=kwargs["generation"],
+            include_neighbor_videos=kwargs["include_neighbor_videos"],
+            current_kind=kwargs["current_kind"],
+        )
+        thumbnail_path(filename).write_bytes(b"video-thumbnail")
+        return result
+
+    monkeypatch.setattr(app_module, "enqueue_warm", recover)
+    response = client.get("/thumb/video.mp4")
+
+    assert response.status_code == 200
+    assert response.data == b"video-thumbnail"
+    assert kinds == ["preview"]
 
 
 def test_streaming_partial_video_status_and_route(media_env, monkeypatch):

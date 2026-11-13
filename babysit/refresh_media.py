@@ -50,7 +50,8 @@ from .media_cache import (
 )
 
 # 刷新间隔（秒）
-REFRESH_INTERVAL = 3 * 60  # 3分钟
+REFRESH_INTERVAL = int(os.environ.get("BABYSIT_REFRESH_INTERVAL_SECONDS", 3 * 60))
+DISABLE_PERIODIC_REFRESH = os.environ.get("BABYSIT_DISABLE_PERIODIC_REFRESH") == "1"
 
 # 支持的文件扩展名
 SUPPORTED_EXTS = (".jpg", ".jpeg", ".png", ".mp4", ".mov", ".heic", ".livp")
@@ -864,6 +865,47 @@ def process_original_livp(file_info):
         temp_output.unlink(missing_ok=True)
 
 
+def video_file_is_valid(path):
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=pix_fmt:format=duration", "-of", "json", str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return False
+        import json
+        data = json.loads(result.stdout)
+        streams = data.get("streams", [])
+        duration = float(data.get("format", {}).get("duration", 0))
+        return bool(streams and streams[0].get("pix_fmt") and duration > 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+def process_preview_from_existing(filename):
+    preview = preview_path(filename)
+    thumbnail = thumbnail_path(filename)
+    if thumbnail.exists() and preview.exists():
+        return True
+    if not preview.exists():
+        video = existing_video_path(filename)
+        if not video or not video_file_is_valid(video):
+            return False
+        data = generate_video_thumbnail(video, (800, 800))
+        if not data:
+            return False
+        _write_bytes_atomic(preview, data.getvalue())
+    with Image.open(preview) as image:
+        data = generate_image_thumbnail(image, (200, 200))
+    _write_bytes_atomic(thumbnail, data.getvalue())
+    return True
+
+
 def process_one_warm_job():
     job = claim_next_warm_job()
     if not job:
@@ -897,6 +939,10 @@ def process_one_warm_job():
         except Exception as error:
             finish_warm_job(job["id"], str(error))
         return True
+    if job["kind"] == "preview" and process_preview_from_existing(job["filename"]):
+        record_cache_assets(job["filename"])
+        finish_warm_job(job["id"])
+        return True
     try:
         required = row["file_size"] or 0 if job["kind"] == "video" else 0
         budget = enforce_cache_budget(required_bytes=required)
@@ -925,7 +971,7 @@ def main():
     init_media_cache()
     next_refresh = 0
     while True:
-        if time.time() >= next_refresh:
+        if not DISABLE_PERIODIC_REFRESH and time.time() >= next_refresh:
             try:
                 refresh_media()
                 enforce_cache_budget()

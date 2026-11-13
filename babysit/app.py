@@ -26,8 +26,11 @@ from .media_cache import (
     existing_video_path,
     get_media_status,
     get_original_livp_status,
+    get_warm_job_error,
     init_media_cache,
     original_livp_path,
+    preview_path as media_preview_path,
+    thumbnail_path,
     partial_video_path,
     touch_media_access,
 )
@@ -178,16 +181,19 @@ def create_app():
         cache_file = CACHE_DIR / "thumbs" / f"{quote(filename, safe='')}_200x200.jpg"
         if not cache_file.exists():
             try:
-                recover_cold_media(filename)
+                recover_cold_media(filename, "thumbnail")
             except (TimeoutError, RuntimeError) as error:
                 return jsonify({"error": "RECOVERY_FAILED", "message": str(error)}), 503
             except FileNotFoundError:
                 return jsonify({"error": "媒体不存在"}), 404
         if cache_file.exists():
-            return send_file(cache_file, mimetype="image/jpeg")
+            try:
+                return send_file(cache_file, mimetype="image/jpeg")
+            except FileNotFoundError:
+                return jsonify({"error": "RECOVERY_FAILED", "message": "缩略图已清理，请重试"}), 503
         return jsonify({"error": "RECOVERY_FAILED", "message": "缩略图恢复失败"}), 503
 
-    def recover_cold_media(filename):
+    def recover_cold_media(filename, asset):
         from .db import get_db
 
         rows = get_db().execute(
@@ -200,20 +206,27 @@ def create_app():
         index = names.index(filename)
         neighbor_indexes = [index - 2, index - 1, index + 1, index + 2]
         neighbors = [names[i] for i in neighbor_indexes if 0 <= i < len(names)]
+        is_video = os.path.splitext(filename)[1].lower() in (".mov", ".mp4", ".livp")
+        kind = "video" if asset == "video" and is_video else "preview"
         enqueue_warm(
             filename,
             "native-preview",
             neighbors,
             generation=time.time_ns(),
-            include_neighbor_videos=True,
+            include_neighbor_videos=asset == "video",
+            current_kind=kind,
         )
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
-            status = get_media_status(filename)
-            if status["state"] in ("ready", "streaming"):
-                return status
-            if status["state"] == "error":
-                raise RuntimeError((status.get("job") or {}).get("error") or "媒体恢复失败")
+            if asset == "thumbnail" and thumbnail_path(filename).exists():
+                return
+            if asset == "preview" and media_preview_path(filename).exists():
+                return
+            if asset == "video" and get_media_status(filename)["state"] in ("ready", "streaming"):
+                return
+            error = get_warm_job_error(filename, kind)
+            if error:
+                raise RuntimeError(error)
             time.sleep(0.1)
         raise TimeoutError("媒体恢复超时，请重试")
 
@@ -222,7 +235,7 @@ def create_app():
         cache_file = CACHE_DIR / "previews" / f"{quote(filename, safe='')}_800x800.jpg"
         if not cache_file.exists():
             try:
-                recover_cold_media(filename)
+                recover_cold_media(filename, "preview")
             except (TimeoutError, RuntimeError) as error:
                 return jsonify({"error": "RECOVERY_FAILED", "message": str(error)}), 503
             except FileNotFoundError:
@@ -239,7 +252,7 @@ def create_app():
         cache_file = existing_video_path(filename)
         if not cache_file:
             try:
-                recover_cold_media(filename)
+                recover_cold_media(filename, "video")
             except (TimeoutError, RuntimeError) as error:
                 return jsonify({"error": "RECOVERY_FAILED", "message": str(error)}), 503
             except FileNotFoundError:

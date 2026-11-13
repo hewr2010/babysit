@@ -197,6 +197,15 @@ def _latest_job(db, filename, kind):
     ).fetchone()
 
 
+def get_warm_job_error(filename, kind, db_path=None):
+    db = _connect(db_path)
+    try:
+        job = _latest_job(db, filename, kind)
+        return job["error"] if job else None
+    finally:
+        db.close()
+
+
 def get_media_status(filename, cache_dir=None, db_path=None):
     preview_ready = image_assets_ready(filename, cache_dir)
     is_video = Path(filename).suffix.lower() in VIDEO_EXTS
@@ -237,13 +246,14 @@ def enqueue_warm(
     generation=1,
     include_current=True,
     include_neighbor_videos=False,
+    current_kind=None,
     cache_dir=None,
     db_path=None,
 ):
     is_video = Path(filename).suffix.lower() in VIDEO_EXTS
     requested = []
     if include_current:
-        requested.append((filename, "video" if is_video else "preview", 100))
+        requested.append((filename, current_kind or ("video" if is_video else "preview"), 100))
     requested.extend(
         (
             name,
