@@ -1,5 +1,7 @@
+import json
 import os
 import sqlite3
+import subprocess
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -121,6 +123,40 @@ def _file_size(path):
     return path.stat().st_size if path and path.is_file() else 0
 
 
+_VIDEO_VALIDATION_CACHE = {}
+
+
+def video_file_is_valid(path):
+    if not path:
+        return False
+    path = Path(path)
+    try:
+        stat = path.stat()
+        key = (str(path), stat.st_mtime_ns, stat.st_size)
+        if key in _VIDEO_VALIDATION_CACHE:
+            return _VIDEO_VALIDATION_CACHE[key]
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=pix_fmt:format=duration", "-of", "json", str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            valid = False
+        else:
+            data = json.loads(result.stdout)
+            streams = data.get("streams", [])
+            duration = float(data.get("format", {}).get("duration", 0))
+            valid = bool(streams and streams[0].get("pix_fmt") and duration > 0)
+        _VIDEO_VALIDATION_CACHE[key] = valid
+        return valid
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
 def image_assets_ready(filename, cache_dir=None):
     return (
         _file_size(thumbnail_path(filename, cache_dir)) > 0
@@ -224,7 +260,7 @@ def get_media_status(filename, cache_dir=None, db_path=None):
             is_video
             and job["status"] == "processing"
             and job["playback_ready"]
-            and _file_size(partial_video_path(filename, cache_dir)) > 0
+            and video_file_is_valid(partial_video_path(filename, cache_dir))
         ):
             state = "streaming"
     elif not ready and job and job["status"] == "error":
@@ -291,7 +327,7 @@ def enqueue_warm(
                 )
         for name, kind, priority in requested:
             ready = (
-                _file_size(existing_video_path(name, cache_dir)) > 0
+                video_file_is_valid(existing_video_path(name, cache_dir))
                 if kind == "video"
                 else image_assets_ready(name, cache_dir)
             )
@@ -338,7 +374,7 @@ def _job_output_ready(job, cache_dir=None):
     if job["kind"] == "original_livp":
         return _file_size(original_livp_path(job["filename"], cache_dir)) > 0
     if job["kind"] == "video":
-        return _file_size(existing_video_path(job["filename"], cache_dir)) > 0
+        return video_file_is_valid(existing_video_path(job["filename"], cache_dir))
     return image_assets_ready(job["filename"], cache_dir)
 
 

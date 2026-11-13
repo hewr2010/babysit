@@ -33,6 +33,7 @@ from .media_cache import (
     thumbnail_path,
     partial_video_path,
     touch_media_access,
+    video_file_is_valid,
 )
 
 # Vue3 frontend dist directory
@@ -223,7 +224,9 @@ def create_app():
             if asset == "preview" and media_preview_path(filename).exists():
                 return
             if asset == "video" and get_media_status(filename)["state"] in ("ready", "streaming"):
-                return
+                candidate = existing_video_path(filename) or partial_video_path(filename)
+                if candidate and video_file_is_valid(candidate):
+                    return
             error = get_warm_job_error(filename, kind)
             if error:
                 raise RuntimeError(error)
@@ -250,6 +253,8 @@ def create_app():
         if ext not in (".mov", ".mp4", ".livp"):
             return jsonify({"error": "不支持的视频格式"}), 400
         cache_file = existing_video_path(filename)
+        if cache_file and not video_file_is_valid(cache_file):
+            cache_file = None
         if not cache_file:
             try:
                 recover_cold_media(filename, "video")

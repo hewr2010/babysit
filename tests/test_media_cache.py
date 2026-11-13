@@ -57,6 +57,17 @@ def add_media(db_path, filename, file_type="photo", date="2026-01-01", milestone
     thumb.write_bytes(b"thumb")
 
 
+def write_test_video(path):
+    import subprocess
+
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=8",
+         "-pix_fmt", "yuv420p", "-y", str(path)],
+        check=True,
+        capture_output=True,
+    )
+
+
 def jobs(db_path):
     db = sqlite3.connect(db_path)
     db.row_factory = sqlite3.Row
@@ -390,6 +401,10 @@ def test_invalid_video_is_not_used_for_preview(media_env):
     video_output_path("broken.mp4").write_bytes(b"not-a-real-video")
     assert refresh.video_file_is_valid(video_output_path("broken.mp4")) is False
     assert refresh.process_preview_from_existing("broken.mp4") is False
+    enqueue_warm("broken.mp4", "client", generation=1)
+    job = claim_next_warm_job()
+    assert job["kind"] == "video"
+    assert job["status"] == "processing"
 
 
 def test_video_with_cache_but_missing_thumbnail_uses_preview_job(media_env, monkeypatch):
@@ -433,17 +448,17 @@ def test_streaming_partial_video_status_and_route(media_env, monkeypatch):
     client = app_module.create_app().test_client()
     enqueue_warm("large.mp4", "client", generation=1)
     job = claim_next_warm_job()
-    partial_video_path("large.mp4").write_bytes(b"partial-video")
+    write_test_video(partial_video_path("large.mp4"))
     update_warm_job_progress(job["id"], progress=5, stage="转码", playback_ready=1)
 
     assert get_media_status("large.mp4")["state"] == "streaming"
     response = client.get("/video/large.mp4")
     assert response.status_code == 200
-    assert response.data == b"partial-video"
+    assert response.data == partial_video_path("large.mp4").read_bytes()
 
-    video_output_path("large.mp4").write_bytes(b"complete-video")
+    write_test_video(video_output_path("large.mp4"))
     assert get_media_status("large.mp4")["state"] == "ready"
-    assert client.get("/video/large.mp4").data == b"complete-video"
+    assert client.get("/video/large.mp4").data == video_output_path("large.mp4").read_bytes()
 
 
 def test_large_video_transcodes_first_segment_without_full_download(media_env, monkeypatch, tmp_path):
@@ -506,7 +521,7 @@ def test_cold_video_request_waits_for_first_playable_segment(media_env, monkeypa
             include_neighbor_videos=kwargs["include_neighbor_videos"],
         )
         job = claim_next_warm_job()
-        partial_video_path(filename).write_bytes(b"first-segment")
+        write_test_video(partial_video_path(filename))
         update_warm_job_progress(job["id"], progress=5, stage="转码", playback_ready=1)
         return result
 
@@ -514,7 +529,7 @@ def test_cold_video_request_waits_for_first_playable_segment(media_env, monkeypa
     response = client.get("/video/large.mp4")
 
     assert response.status_code == 200
-    assert response.data == b"first-segment"
+    assert response.data == partial_video_path("large.mp4").read_bytes()
 
 
 def test_original_livp_is_unpacked_without_transcoding(media_env, monkeypatch):

@@ -47,6 +47,7 @@ from .media_cache import (
     record_cache_assets,
     thumbnail_path,
     update_warm_job_progress,
+    video_file_is_valid,
 )
 
 # 刷新间隔（秒）
@@ -388,15 +389,15 @@ def transcode_video(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output_path.with_name(f".{output_path.name}.stream.mp4")
     temp_output.unlink(missing_ok=True)
-    scale = "if(gt(iw,ih),min(iw,1280),-2)"
+    scale = "if(gt(iw,ih),min(iw,1920),-2)"
     is_remote = str(source_path).startswith(("http://", "https://"))
     source = "pipe:0" if is_remote else str(source_path)
     command = [
         "ffmpeg", "-y", "-analyzeduration", "1000000", "-probesize", "1000000",
         "-i", source, "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", f"scale=w='{scale}':h='{scale}'",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "27", "-g", "60", "-keyint_min", "30",
-        "-maxrate", "3M", "-bufsize", "6M", "-pix_fmt", "yuv420p",
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-g", "60", "-keyint_min", "30",
+        "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
         "-progress", "pipe:1", "-nostats", str(temp_output),
@@ -468,7 +469,12 @@ def transcode_video(
                 progress = min(99, round(output_seconds / duration["seconds"] * 100, 1))
                 update_warm_job_progress(job_id, progress=progress, stage="转码")
                 last_update = now
-            if not first_play and output_seconds >= 1.5 and temp_output.stat().st_size > 0:
+            if (
+                not first_play
+                and output_seconds >= 1.5
+                and temp_output.stat().st_size > 0
+                and video_file_is_valid(temp_output)
+            ):
                 first_play = True
                 if job_id:
                     update_warm_job_progress(
@@ -863,28 +869,6 @@ def process_original_livp(file_info):
     finally:
         source.unlink(missing_ok=True)
         temp_output.unlink(missing_ok=True)
-
-
-def video_file_is_valid(path):
-    try:
-        result = subprocess.run(
-            [
-                "ffprobe", "-v", "error", "-select_streams", "v:0",
-                "-show_entries", "stream=pix_fmt:format=duration", "-of", "json", str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return False
-        import json
-        data = json.loads(result.stdout)
-        streams = data.get("streams", [])
-        duration = float(data.get("format", {}).get("duration", 0))
-        return bool(streams and streams[0].get("pix_fmt") and duration > 0)
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
 
 
 def process_preview_from_existing(filename):
