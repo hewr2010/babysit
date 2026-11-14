@@ -602,7 +602,7 @@ def test_landscape_transcode_preserves_aspect_ratio(media_env, tmp_path):
         text=True,
     )
     stream = json.loads(probe.stdout)["streams"][0]
-    assert (stream["width"], stream["height"]) == (3840, 2160)
+    assert (stream["width"], stream["height"]) == (1920, 1080)
     assert get_media_status("landscape.mp4")["video_ready"] is True
 
 

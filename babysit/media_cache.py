@@ -124,7 +124,7 @@ def existing_video_path(filename, cache_dir=None):
     return None
 
 
-VIDEO_CACHE_VERSION = 1
+VIDEO_CACHE_VERSION = 2
 
 
 def video_metadata_path(video_path):

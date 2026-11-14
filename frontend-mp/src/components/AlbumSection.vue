@@ -12,7 +12,7 @@
       </view>
       <view class="media-grid">
         <view v-for="item in visibleItems(group)" :key="item.name" class="media-cell" @click="open(item)" @longpress.stop="showActions(item)">
-          <image class="media-thumb" :src="thumbUrl(item.name)" mode="aspectFill" :lazy-load="groupIndex > 0" />
+          <image class="media-thumb" :src="localImage(thumbUrl(item.name))" mode="aspectFill" :lazy-load="groupIndex > 0" />
           <view v-if="item.type === 'video'" class="video-badge">▶</view>
           <view v-if="needsRecovery(item)" class="recovery-badge">点击恢复</view>
           <view v-if="milestoneNames.has(item.name)" class="milestone-badge">⭐</view>
@@ -42,6 +42,7 @@ import { computed, ref, watch } from 'vue'
 import AppSheet from '@/components/AppSheet.vue'
 import MilestoneEditor from '@/components/MilestoneEditor.vue'
 import { saveToAlbum, thumbUrl } from '@/services/media'
+import { localImage, preloadImages } from '@/services/localImages'
 import { useAppStore } from '@/stores/app'
 import { shortDate } from '@/utils/date'
 
@@ -57,6 +58,9 @@ const groups = computed(() => Object.keys(store.albumByDate).sort().reverse().ma
   date,
   items: [...store.albumByDate[date]].sort((a, b) => (b.time || '').localeCompare(a.time || ''))
 })))
+watch(groups, value => {
+  preloadImages(value.flatMap(group => group.items.map(item => thumbUrl(item.name))))
+}, { immediate: true })
 const milestoneNames = computed(() => new Set(store.milestones.map(item => item.media_filename)))
 const selectedMilestones = computed(() => selectedMedia.value
   ? store.milestones.filter(item => item.media_filename === selectedMedia.value.name)

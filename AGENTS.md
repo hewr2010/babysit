@@ -145,7 +145,7 @@ frontend/src/
 - 浏览即预恢复：相册月份 API 被请求时自动以低优先级（20-30，用户点击为 100）预恢复当月前 6 个视频；用户点击与后台预取由两个 worker 工位并行处理（`claim_next_warm_job` 按优先级区间认领）。
 - moov 在文件尾的 MP4/MOV（iPhone 录制普遍如此）通过 `plan_remux` 重封装为 faststart 流：并发抓头部 64KB 与尾部（按 DB file_size 预估，1/8/32MB 阶梯）定位 moov，`_patch_moov_chunk_offsets` 平移 stco/co64 偏移后前置，mdat 由 `_PrefetchReader` 后台预读（断点续传重试、128MB 缓冲上限）。任何一步不可行回退先落盘再转码。管道流式只适用于 moov 在前的文件，直接管道输入不可行（无法回 seek）。
 - `/video` 冷请求边转码边吐字节：部分文件一写出 moov 就开始流式响应（10 秒无增长自动断流兜底），浏览器拿到首个分片即起播，不等 playback_ready。
-- 下载直链内存 + SQLite（`download_url_cache` 表）双级缓存 30 分钟，避免每次冷恢复付 pcs API 往返。解码用 `-hwaccel videotoolbox`（`BABYSIT_DISABLE_HWACCEL=1` 可关），编码 macOS 用 h264_videotoolbox `-q:v 80`，其他平台 libx264 `-crf 18`，缩放上限 3840，`-force_key_frames expr:gte(t,n_forced*1)` 保证 1 秒一个分片。旧参数产物没有 `VIDEO_CACHE_VERSION` 元数据标记，`video_asset_is_ready` 会判为未就绪并自动重建。
+- 下载直链内存 + SQLite（`download_url_cache` 表）双级缓存 30 分钟，避免每次冷恢复付 pcs API 往返。解码用 `-hwaccel videotoolbox`（`BABYSIT_DISABLE_HWACCEL=1` 可关），编码 macOS 用 h264_videotoolbox 1080p 上限 + `-b:v 10M -maxrate 12M`，其他平台 libx264 `-crf 19` 同码率上限，`-force_key_frames expr:gte(t,n_forced*1)` 保证 1 秒一个分片。不要用 `-q:v 80`/4K 上限（产物可达 60-90Mbps、单文件 2GB，微信 previewMedia 无法播放）。产物带 `VIDEO_CACHE_VERSION` 元数据标记（当前为 2），无标记或版本不符的缓存 `video_asset_is_ready` 判为未就绪并自动重建。
 - 大视频使用 requests 单字节流喂给 FFmpeg，输出 H.264/AAC 分段 MP4；首段可播即 `streaming`，完整缓存才为 `ready`。完整恢复不得重载播放器。网盘 CDN 对同 URL 并发 Range 请求会限速和超时，已验证不可行，不要改回并行分段下载。
 - Flask 只负责排队、状态轮询和响应，禁止在 Web 进程执行 FFmpeg、Pillow 或 ZIP 解包。所有媒体处理必须在 `refresh_media` 中完成，包括原始 `.livp` 的 MOV 解包；临时原件在响应关闭后删除。
 - benchmark 使用 `.venv/bin/python -m babysit.media_recovery_bmk --mode compare`，报告和私人样本放在被忽略的 `babysit/data/media_recovery_bmk/`。禁止并行网络测试，首段文件必须实际解码。
@@ -411,5 +411,6 @@ npm run build:mp-weixin
 - 自定义导航页面必须根据 `statusBarHeight` 留出顶部空间。
 - 组件内旧版 canvas 必须向 `uni.createCanvasContext` 传入组件实例。
 - WXSS 不使用 `*` 通配符，不混用不兼容的 `calc()` 单位。
+- iOS 上 `<image>` 组件拒绝加载 http 明文地址（ATS），真机调试时接口和 previewMedia 正常但 `<image>` 全部空白。所有网络图片统一走 `src/services/localImages.js`：downloadFile 先落本地临时文件再渲染，新增 `<image>` 时必须使用 `localImage()` + `preloadImages()`。
 - 自动化清理 storage 使用 `wx.clearStorageSync()`。
 - 微信 `onLoad` 查询参数可能仍是 URL 编码，媒体文件名比较前必须安全解码；H5 与微信行为不同，分享测试需覆盖 `%20` 和非首项。

@@ -806,8 +806,11 @@ def _video_encoder_args():
             timeout=5,
         )
         if "h264_videotoolbox" in result.stdout:
-            return ["h264_videotoolbox", "-q:v", "80", "-profile:v", "high", "-realtime", "0"]
-    return ["libx264", "-preset", "veryfast", "-crf", "18"]
+            return [
+                "h264_videotoolbox", "-b:v", "10M", "-maxrate", "12M",
+                "-bufsize", "16M", "-profile:v", "high", "-realtime", "0",
+            ]
+    return ["libx264", "-preset", "veryfast", "-crf", "19", "-maxrate", "12M", "-bufsize", "16M"]
 
 
 def _video_hwaccel_args():
@@ -823,7 +826,7 @@ def transcode_video(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output_path.with_name(f".{output_path.name}.stream.mp4")
     temp_output.unlink(missing_ok=True)
-    scale = "scale=w='min(iw,3840)':h='min(ih,3840)':force_original_aspect_ratio=decrease:force_divisible_by=2"
+    scale = "scale=w='min(iw,1920)':h='min(ih,1920)':force_original_aspect_ratio=decrease:force_divisible_by=2"
     is_remote = str(source_path).startswith(("http://", "https://"))
     source = "pipe:0" if is_remote else str(source_path)
     command = [
