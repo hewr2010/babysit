@@ -27,7 +27,7 @@ class FakeImageClient:
         self.target_files = list(target_files)
         self.page_size = 100
 
-    def iter_pages(self):
+    def iter_pages(self, native_after=None):
         yield from self.pages
 
     def list_files(self, remote_path):
@@ -171,17 +171,26 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(matcher.calls, 1)
         self.assertEqual(len(copier.copies), 1)
 
-    def test_video_uses_extracted_frames(self):
+    def test_video_uses_extracted_frames_without_thumbnail(self):
         service, store, _, _ = self.service(
             [[photo(1, name="clip.livp")]], {"1": 0.7}
         )
+
+        def fail_thumbnail(*args):
+            raise AssertionError("视频不应下载缩略图")
+
+        service.image_client.download_thumbnail = fail_thumbnail
+        service.image_client.prefetch_thumbnails = fail_thumbnail
 
         class Extractor:
             called = False
 
             def extract(self, item):
                 self.called = True
-                return [Path(service.config.cache_dir) / "1.jpg"]
+                path = Path(service.config.cache_dir) / "1.jpg"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"1")
+                return [path]
 
         extractor = Extractor()
         service._video_extractor = extractor
@@ -250,6 +259,7 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(store.get(1)["target_path"], target)
         self.assertEqual(matcher.calls, 0)
         self.assertEqual(copier.copies, [])
+        self.assertEqual(service.notifier.calls, [])
 
     def test_same_filename_with_different_md5_is_not_skipped(self):
         original = "/apps/bypy/爸妈与小宝/IMG_1.jpg"
@@ -347,6 +357,7 @@ class PhotoSyncTestCase(unittest.TestCase):
         self.assertEqual(store.get(2)["status"], "pending")
         self.assertEqual(store.get(3)["status"], "pending")
         self.assertEqual(store.get(4)["status"], "copied")
+        self.assertEqual(store.get_state("scan_backlog"), "1")
 
     def test_backlog_is_processed_on_later_runs(self):
         from dataclasses import replace

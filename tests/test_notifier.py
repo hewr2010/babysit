@@ -23,11 +23,10 @@ class BarkNotifierTests(unittest.TestCase):
         self.assertEqual(post.call_args_list[0].args[0], urls[0])
         self.assertEqual(post.call_args_list[1].args[0], urls[1])
         body = post.call_args.kwargs["data"]["body"]
-        self.assertIn("新复制 2 个", body)
-        self.assertIn("目标已有 5 个", body)
-        self.assertIn("待确认新增 1 个", body)
-        self.assertIn("当前待人工处理 7 个", body)
-        self.assertIn("不匹配 20 个", body)
+        self.assertEqual(
+            body,
+            "新处理 23 个，正例 2 个，需人工到「爸妈与小宝-review」确认 1 个。",
+        )
 
     @patch("babysit.notifier.requests.post")
     def test_title_body_placeholder_is_replaced(self, post):
@@ -58,6 +57,13 @@ class BarkNotifierTests(unittest.TestCase):
     def test_empty_round_is_not_sent(self, post):
         notifier = BarkNotifier(urls=["https://example.test/only"])
         self.assertFalse(notifier.notify_round({}, 0))
+        post.assert_not_called()
+
+    @patch("babysit.notifier.requests.post")
+    def test_reconciliation_and_retry_round_is_not_sent(self, post):
+        notifier = BarkNotifier(urls=["https://example.test/only"])
+        results = {"existing": 17, "review_copied": 2, "error": 1}
+        self.assertFalse(notifier.notify_round(results, 3))
         post.assert_not_called()
 
     @patch("babysit.notifier.requests.post")

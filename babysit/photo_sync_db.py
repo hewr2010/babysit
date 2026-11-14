@@ -253,6 +253,8 @@ class PhotoSyncStore:
             """
         cursor = self.db.execute(query, params)
         self.db.commit()
+        if cursor.rowcount:
+            self.set_state("scan_backlog", "1")
         return cursor.rowcount
 
     def get_state(self, key):

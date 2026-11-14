@@ -103,7 +103,7 @@ class PhotoSyncService:
         return self.store.counts().get("review", 0)
 
     def _notify_round(self, results):
-        activity_keys = ("copied", "existing", "review", "rejected", "error")
+        activity_keys = ("copied", "review", "rejected")
         if any(results.get(key, 0) for key in activity_keys):
             self.notifier.notify_round(results, self._pending_review_count())
 
@@ -133,10 +133,11 @@ class PhotoSyncService:
                 return self._record_error(fs_id, exc)
 
         thumbnail_path = self.config.cache_dir / f"{fs_id}.jpg"
+        is_video = Path(photo["server_filename"]).suffix.lower() in VIDEO_EXTENSIONS
         try:
-            if not thumbnail_path.exists():
+            if not thumbnail_path.exists() and not is_video:
                 self.image_client.download_thumbnail(photo, thumbnail_path)
-            if Path(photo["server_filename"]).suffix.lower() in VIDEO_EXTENSIONS:
+            if is_video:
                 frames = self.video_extractor.extract(photo)
                 match = self.matcher.match_frames(frames)
                 if match.best_frame_path:
@@ -207,7 +208,11 @@ class PhotoSyncService:
         processed = 0
         limit_hit = False
         backlog = self.store.get_state("scan_backlog") == "1"
-        for page in self.image_client.iter_pages():
+        native_after = self.store.get_state("native_video_after")
+        if native_after is None:
+            native_after = str(int(time.time()))
+            self.store.set_state("native_video_after", native_after)
+        for page in self.image_client.iter_pages(native_after=int(native_after)):
             candidates = []
             for photo in page:
                 fs_id = str(photo["fs_id"])
@@ -236,9 +241,16 @@ class PhotoSyncService:
                     continue
                 if item and item["retry_count"] >= self.config.max_retries:
                     continue
+                is_video = Path(photo["server_filename"]).suffix.lower() in VIDEO_EXTENSIONS
+                if is_video:
+                    continue
                 prefetch.append(photo)
-            prefetch_errors = self.image_client.prefetch_thumbnails(
-                prefetch, self.config.cache_dir, self.config.download_workers
+            prefetch_errors = (
+                self.image_client.prefetch_thumbnails(
+                    prefetch, self.config.cache_dir, self.config.download_workers
+                )
+                if prefetch
+                else {}
             )
             for photo in candidates:
                 fs_id = str(photo["fs_id"])

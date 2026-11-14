@@ -93,14 +93,49 @@ class BaiduImageClient:
             start += len(batch)
         return files
 
-    def iter_pages(self):
+    def iter_pages(self, native_after=None):
+        native_videos = sorted(
+            (
+                item
+                for item in self.list_files(self.source_path)
+                if Path(item.get("server_filename", "")).suffix.lower()
+                in {".mov", ".mp4"}
+                and (
+                    native_after is None
+                    or (item.get("server_mtime", 0) or 0) >= native_after
+                )
+            ),
+            key=lambda item: item.get("server_mtime", 0) or 0,
+            reverse=True,
+        )
+        native_index = 0
+        seen = set()
         page = 1
         while True:
             items = self.list_page(page)
-            yield items
+            if not items:
+                break
+            seen.update(str(item["fs_id"]) for item in items)
+            oldest = min(item.get("server_mtime", 0) or 0 for item in items)
+            merged = list(items)
+            while native_index < len(native_videos):
+                item = native_videos[native_index]
+                if (item.get("server_mtime", 0) or 0) < oldest:
+                    break
+                native_index += 1
+                if str(item["fs_id"]) not in seen:
+                    merged.append(item)
+            merged.sort(
+                key=lambda item: item.get("server_mtime", 0) or 0, reverse=True
+            )
+            yield merged
             if len(items) < self.page_size:
                 break
             page += 1
+        while native_index < len(native_videos):
+            batch = native_videos[native_index : native_index + self.page_size]
+            native_index += len(batch)
+            yield [item for item in batch if str(item["fs_id"]) not in seen]
 
     def download_thumbnail(self, photo, destination):
         thumbs = photo.get("thumbs") or {}
