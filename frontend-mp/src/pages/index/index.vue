@@ -90,6 +90,15 @@ function showRecordOptions() {
 }
 
 function openMedia(index) {
+  const item = store.media[index]
+  const cold = item && (item.type === 'video' ? item.video_ready === false : item.preview_ready === false)
+  if (cold) {
+    uni.showToast({
+      title: '需恢复，已同步缓存前后两张',
+      icon: 'none',
+      duration: 2500
+    })
+  }
   uni.previewMedia({
     ...nativePreviewOptions(store.media, index),
     fail: () => uni.showModal({

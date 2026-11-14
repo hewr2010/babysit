@@ -14,6 +14,7 @@
         <view v-for="item in visibleItems(group)" :key="item.name" class="media-cell" @click="open(item)" @longpress.stop="showActions(item)">
           <image class="media-thumb" :src="thumbUrl(item.name)" mode="aspectFill" :lazy-load="groupIndex > 0" />
           <view v-if="item.type === 'video'" class="video-badge">▶</view>
+          <view v-if="needsRecovery(item)" class="recovery-badge">点击恢复</view>
           <view v-if="milestoneNames.has(item.name)" class="milestone-badge">⭐</view>
           <button class="media-menu-button" @click.stop="showActions(item)">···</button>
           <text v-if="item.time" class="media-time">{{ item.time }}</text>
@@ -75,6 +76,12 @@ function toggleDate(date) {
   if (next.has(date)) next.delete(date)
   else next.add(date)
   expandedDates.value = next
+}
+
+function needsRecovery(item) {
+  return item.type === 'video'
+    ? item.video_ready === false
+    : item.preview_ready === false
 }
 
 function open(item) {
@@ -208,6 +215,18 @@ async function saveCurrent() {
   background: rgba(236, 72, 153, 0.9);
   font-size: 20rpx;
   line-height: 1.2;
+}
+
+.recovery-badge {
+  position: absolute;
+  top: 8rpx;
+  right: 8rpx;
+  padding: 4rpx 10rpx;
+  border-radius: 16rpx;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffd666;
+  font-size: 18rpx;
+  line-height: 1.4;
 }
 
 .media-menu-button {

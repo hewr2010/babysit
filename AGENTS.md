@@ -97,9 +97,10 @@ frontend/src/
 - error, retry_count, created_at, updated_at
 
 ### 文件缓存
-- `babysit/data/cache/thumbs/` - 200x200 缩略图
-- `babysit/data/cache/previews/` - 800x800 预览图
-- `babysit/data/cache/videos/` - 视频缓存（从 .livp 提取）
+- `babysit/data/cache/thumbs/` - 200x200 永久缩略图，不参与 LRU
+- `babysit/data/cache/previews/` - 800x800 预览图，历史内容可按 LRU 清理
+- `babysit/data/cache/videos/` - H.264 MP4 播放派生文件，不长期保存原始视频
+- 最近 30 天媒体和重要时刻预览受保护；容量和水位通过 `BABYSIT_CACHE_MAX_BYTES`、`BABYSIT_CACHE_HIGH_WATERMARK`、`BABYSIT_CACHE_LOW_WATERMARK` 配置。压测专用：`BABYSIT_CACHE_MAX_ITEMS=N` 只保留最近访问的 N 个条目的预览/视频（缩略图不动），`BABYSIT_CACHE_DISABLE_PROTECTION=1` 关闭 30 天/重要时刻保护；当前 `lru_demo` 数据集以 N=3 运行用于冷恢复压测
 
 ## 路由结构
 
@@ -135,7 +136,22 @@ frontend/src/
 
 ## 后台进程
 
-`refresh_media.py` 每 3 分钟从正式相册获取文件，生成缩略图、预览图、提取 Live Photo 视频并更新 `media_files`。它只负责展示，不负责判断照片中是否有女儿。全量补历史缓存可能很慢，调试单个文件时优先调用 `process_media_file()`，不要无必要地全量刷新。
+`refresh_media.py` 每 3 分钟同步正式相册元数据并生成永久缩略图，同时运行媒体恢复队列。最近 30 天视频转码为 H.264 MP4；历史预览和视频只在小程序请求后恢复，例行刷新不得因缓存被 LRU 清理而重新全量下载。`media_cache.py` 独立维护缓存状态、恢复任务、浏览序号和容量清理，`media_files.processed` 只表示媒体已进入相册，不代表大图或视频仍在本地。它只负责展示，不负责判断照片中是否有女儿。调试单个文件时优先调用 `process_media_file()`。
+
+## 媒体冷恢复与 TTFP
+
+- 所有页面始终使用原生 `previewMedia`，不得重新引入自定义播放器；分享路由也只能启动原生预览。前端不得调用 warm 或编排恢复任务，`/preview`、`/video` 收到冷请求后由后端自动恢复当前及前后各两张。H5 查看器在加载失败或超 3 秒未就绪时显示「媒体恢复中」浮层并每 3 秒重试原地址（最多 10 次），只重试媒体 URL，不调用 warm。H5 视频 src 只在 slide 首次成为当前页时才设置，避免相邻大视频抢带宽。
+- TTFP（首次可播放时间）是核心验收指标，目标全部场景 ≤5s。2026-11-13 实测（单次点击）：热视频 1.7s、冷照片 2.7s、2.2MB 4.2s、53MB 1.7s、655MB 2.6s、legacy 重建 3.0s。
+- 浏览即预恢复：相册月份 API 被请求时自动以低优先级（20-30，用户点击为 100）预恢复当月前 6 个视频；用户点击与后台预取由两个 worker 工位并行处理（`claim_next_warm_job` 按优先级区间认领）。
+- moov 在文件尾的 MP4/MOV（iPhone 录制普遍如此）通过 `plan_remux` 重封装为 faststart 流：并发抓头部 64KB 与尾部（按 DB file_size 预估，1/8/32MB 阶梯）定位 moov，`_patch_moov_chunk_offsets` 平移 stco/co64 偏移后前置，mdat 由 `_PrefetchReader` 后台预读（断点续传重试、128MB 缓冲上限）。任何一步不可行回退先落盘再转码。管道流式只适用于 moov 在前的文件，直接管道输入不可行（无法回 seek）。
+- `/video` 冷请求边转码边吐字节：部分文件一写出 moov 就开始流式响应（10 秒无增长自动断流兜底），浏览器拿到首个分片即起播，不等 playback_ready。
+- 下载直链内存 + SQLite（`download_url_cache` 表）双级缓存 30 分钟，避免每次冷恢复付 pcs API 往返。解码用 `-hwaccel videotoolbox`（`BABYSIT_DISABLE_HWACCEL=1` 可关），编码 macOS 用 h264_videotoolbox `-q:v 80`，其他平台 libx264 `-crf 18`，缩放上限 3840，`-force_key_frames expr:gte(t,n_forced*1)` 保证 1 秒一个分片。旧参数产物没有 `VIDEO_CACHE_VERSION` 元数据标记，`video_asset_is_ready` 会判为未就绪并自动重建。
+- 大视频使用 requests 单字节流喂给 FFmpeg，输出 H.264/AAC 分段 MP4；首段可播即 `streaming`，完整缓存才为 `ready`。完整恢复不得重载播放器。网盘 CDN 对同 URL 并发 Range 请求会限速和超时，已验证不可行，不要改回并行分段下载。
+- Flask 只负责排队、状态轮询和响应，禁止在 Web 进程执行 FFmpeg、Pillow 或 ZIP 解包。所有媒体处理必须在 `refresh_media` 中完成，包括原始 `.livp` 的 MOV 解包；临时原件在响应关闭后删除。
+- benchmark 使用 `.venv/bin/python -m babysit.media_recovery_bmk --mode compare`，报告和私人样本放在被忽略的 `babysit/data/media_recovery_bmk/`。禁止并行网络测试，首段文件必须实际解码。
+- 当前有效数据：小图原图直链 1.90/2.92/3.04s，29MB 大图 4.40/6.50/4.83s；18.8MB MOV 6.95s→2.83s；10.5MB Live Photo 4.55s→2.91s；40MB HEVC 6.97s→约 2.28–4.08s；766MB HEVC 151.99s→2.61s（复测 2.65–2.71s）。缩略图接口路径已放弃，生产恢复使用原图直链。
+- 周期刷新和转码必须让位用户冷请求，不能让用户等待整个周期任务。周期任务运行时实测冷照片约 5.47s、冷视频约 5.50s。
+- 百度签名可能校验 User-Agent，不要在下载链路随意改成浏览器 UA。视频 stdin 必须保持二进制。
 
 ## 照片同步方案（当前实现）
 
@@ -143,8 +159,9 @@ frontend/src/
 
 ```text
 两台 iPhone → /来自：iPhone
-  → 官方 imagelist 增量读取元数据/缩略图
-  → 本地 InsightFace 人脸及分块识别
+  → 官方 imagelist 增量读取元数据/静态照片缩略图
+  → 官方 list 补充 imagelist 不返回的原生 .mov/.mp4
+  → 本地 InsightFace 人脸及分块识别（视频全部抽帧）
   → 高分复制到 /apps/bypy/爸妈与小宝
   → 灰区复制到 /apps/bypy/爸妈与小宝-review 并发送 Bark
   → refresh_media.py 负责展示缓存和 media_files 入库
@@ -180,8 +197,10 @@ frontend/src/
 分页和 backlog：
 
 - `imagelist` 按修改时间倒序，默认每页 100、每轮最多识别 50 个新文件。
+- `imagelist` 不返回原生 `.mov/.mp4`；必须用官方 `list` 补齐并按 `server_mtime` 合并，否则文件会完全没有识别记录。
+- 首次启用原生视频补扫时写入 `native_video_after`，只自动处理此后上传的文件，避免一次性下载全部历史大视频；历史原生视频要按准确文件单独恢复。
 - `scan_backlog=0` 时，如果当前页全部已处理，可提前停止。
-- 初次处理或重排历史时必须确保 `scan_backlog=1`，否则可能“requeue 了但根本扫不到旧文件”。有积压时每 60 秒一批，追平后恢复 1800 秒。
+- `requeue` 有重排项目时会自动写入 `scan_backlog=1`。有积压时每 60 秒一批，追平后恢复 1800 秒。
 - `fs_id + MD5` 防止双设备、同名和延迟上传漏扫；不要只依赖文件名或拍摄日期。`server_mtime` 用于扫描，`local_mtime` 可能才是拍摄时间。
 
 ### 4. 状态机和失败恢复
@@ -202,7 +221,7 @@ frontend/src/
 
 下载与视频异常：
 
-- 缩略图 4 路并发预取，单文件失败不影响整批。
+- 静态照片缩略图 4 路并发预取，单文件失败不影响整批；视频不预取缩略图。
 - BaiduPCS-Go 可能退出码为 0 但返回 0B，必须校验目标文件非空并最多重试 3 次、指数退避。
 - 损坏 zip、无视频流、ffprobe/ffmpeg 错误统一转为可重试错误，删除损坏原文件避免复用；不能让 daemon 退出。
 - `CalledProcessError` 不属于普通 OSError，必须显式转换处理。
@@ -226,7 +245,8 @@ frontend/src/
 
 视频：
 
-- `.livp` 先按 zip 解出 `.mov`，不能只看封面。
+- 所有 `.livp/.mp4/.mov` 一律直接下载并抽帧，不预取、不判断网盘缩略图；没有 `thumbs` 不是错误。
+- `.livp` 先按 zip 解出 `.mov`。
 - 时长 ≤4 秒时每 0.5 秒抽帧；更长视频至少每 2 秒一帧，最多覆盖 24 个时间点。
 - 每帧使用全图+分块逻辑，取最高相似度及最佳帧。
 - 实际很多 `.livp` 只有 1–3 秒，不要根据用户描述的时长猜实现，先 ffprobe 验证。
@@ -235,11 +255,11 @@ frontend/src/
 
 ### 7. 灰区和人工处理
 
-- `review` 项会复制到 `爸妈与小宝-review` 并变为 `review_copied`，随后发送汇总 Bark。
+- 新识别的 `review` 项会复制到 `爸妈与小宝-review` 并变为 `review_copied`，计入本轮汇总 Bark。
 - 你手动删除灰区文件：不重新复制。
 - 你手动复制到正式目录：下一轮对账会改为正式 `copied`。
 - `approve <fs_id>` 也可复制到正式目录，`reject <fs_id>` 标记不匹配。
-- 每轮只发有实际活动的汇总，空轮不发。内容包括新复制、目标已有、灰区新增、已归档、当前待人工处理、不匹配和失败数。
+- 只有本轮实际完成新识别（`copied/review/rejected`）才发汇总；正文仅含新处理总数（三者之和）、正例数（`copied`）和本轮人工确认数（`review`）。目标对账、已处理跳过、灰区归档、失败重试和空轮不触发通知。
 - 多个 Bark 地址独立请求，单个超时/失败不影响另一个，也不能阻断同步。
 - 可用 Cron 定时检查 pending/backlog，完成后发送“存量处理完成”并删除监控任务，不要另开长期观察进程。
 
@@ -298,6 +318,8 @@ tmux attach -t babysit
 - 双击放大/还原，双指 1–4 倍缩放，放大后单指拖动；桌面支持滚轮。
 - 放大后上下关闭和左右翻页都被抑制，视频保留原生控件。
 - 下滑返回必须跟随手势向下离场，而不是横向退出；相关测试在 `tests/test_iphone_photo_viewer.py`。
+- 媒体加载失败或超过 3 秒未就绪时显示「媒体恢复中」浮层（不拦截手势），每 3 秒带 cache-buster 重试原地址、最多 10 次，命中后端冷恢复即自动起播；只重试 /preview、/video、/livp 原 URL，不调用 warm、不编排恢复任务。
+- 宫格对 `preview_ready`/`video_ready` 为 false 的媒体显示「点击恢复」角标（字段缺失不显示）；点击冷媒体时 toast 提示「需从网盘恢复，已同步开始缓存前后两张」，与后端冷请求自动恢复前后各两张的行为对应。
 
 ## API 端点
 
@@ -351,7 +373,7 @@ tmux attach -t babysit
 - 宝宝姓名、生日、性别展示与编辑，月龄精确到几个月几天。
 - 身高（cm）和体重（kg）的最新摘要、折线图与添加，不展示逐条明细，暂不提供删除入口。体重界面统一使用 kg，后端 API 仍以 g 存储，录入和展示时自动换算。
 - 按月浏览照片和视频，按拍摄日期分组；每日默认显示 6 项，可展开查看更多或收起。
-- 照片和视频统一使用微信原生 `previewMedia`，单次最多传入 50 项，不额外干预循环播放。缩略图星标标识重要时刻，右上角 `···` 按钮打开查看/标记、转发小程序卡片和保存原文件操作层，长按为辅助入口。分享链接保留自定义预览页，原文件限制 50MB。
+- 照片和视频统一使用微信原生 `previewMedia`，单次最多传入 50 项，不额外干预循环播放。缩略图星标标识重要时刻，右上角 `···` 按钮打开查看/标记、转发小程序卡片和保存原文件操作层，长按为辅助入口。分享链接也只启动原生 `previewMedia`，原文件限制 50MB。宫格对 `preview_ready`/`video_ready` 为 false 的媒体显示「点击恢复」角标；点击冷媒体时 toast 提示「需恢复，已同步缓存前后两张」。
 - 预览页可转发小程序卡片到微信群，接收人通过姓名验证后直达对应媒体。
 - 重要时刻创建、删除、首页时间轴和按月管理。
 
