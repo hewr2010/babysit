@@ -603,6 +603,9 @@ def test_landscape_transcode_preserves_aspect_ratio(media_env, tmp_path):
     )
     stream = json.loads(probe.stdout)["streams"][0]
     assert (stream["width"], stream["height"]) == (1920, 1080)
+    head = output.read_bytes()[:65536]
+    boxes = [box for box, *_ in refresh._iter_boxes(head, 0, len(head))]
+    assert boxes.index(b"moov") < boxes.index(b"mdat"), "最终产物必须是 faststart"
     assert get_media_status("landscape.mp4")["video_ready"] is True
 
 

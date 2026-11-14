@@ -321,6 +321,9 @@ def create_app():
             partial = partial_video_path(filename)
             if partial.exists() and partial.stat().st_size > 0:
                 touch_media_access(filename, "video")
+                if "MicroMessenger" in request.headers.get("User-Agent", ""):
+                    # 微信播放器不支持无 Content-Length 的边增长流，给快照文件
+                    return send_file(partial, mimetype="video/mp4", conditional=True)
                 return _stream_growing_video(partial, filename)
         if not cache_file:
             return jsonify({"error": "RECOVERY_FAILED", "message": "视频恢复失败"}), 503

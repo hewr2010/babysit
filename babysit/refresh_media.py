@@ -797,6 +797,33 @@ def build_remux_stream(url, probe):
     return _make_remux_stream(url, ftyp, moov, tail, tail_base, payload_start, payload_end)
 
 
+def _finalize_playable_mp4(temp_output, output_path):
+    """把分段 MP4 无损重写为 faststart（moov 带完整采样表置于文件头）。
+
+    分段输出的 empty moov 没有时长和采样表，微信等播放器无法边下边播，
+    只能缓冲整个文件。重写只拷贝码流不重编码，226MB 约几秒钟。
+    """
+    faststart = output_path.with_name(f".{output_path.name}.faststart.mp4")
+    faststart.unlink(missing_ok=True)
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", str(temp_output), "-c", "copy",
+                "-movflags", "+faststart", str(faststart),
+            ],
+            capture_output=True,
+            timeout=300,
+        )
+        if result.returncode == 0 and faststart.exists() and faststart.stat().st_size > 0:
+            os.replace(faststart, output_path)
+            temp_output.unlink(missing_ok=True)
+            return
+    except (OSError, subprocess.SubprocessError):
+        pass
+    faststart.unlink(missing_ok=True)
+    os.replace(temp_output, output_path)
+
+
 def _video_encoder_args():
     if sys.platform == "darwin" and os.environ.get("BABYSIT_DISABLE_HARDWARE_TRANSCODE") != "1":
         result = subprocess.run(
@@ -941,7 +968,7 @@ def transcode_video(
             return False
         if not first_play and on_first_play:
             on_first_play(temp_output)
-        os.replace(temp_output, output_path)
+        _finalize_playable_mp4(temp_output, output_path)
         mark_video_cache_current(output_path)
         if job_id:
             update_warm_job_progress(job_id, progress=100, stage="完成", playback_ready=1)
