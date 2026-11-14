@@ -271,19 +271,45 @@ def create_app():
                 return jsonify({"error": "媒体不存在"}), 404
         if cache_file.exists():
             touch_media_access(filename, "preview")
-            return send_file(cache_file, mimetype="image/jpeg")
+            try:
+                return send_file(cache_file, mimetype="image/jpeg")
+            except FileNotFoundError:
+                # 发送前被 LRU 清理，让前端重试触发恢复
+                return jsonify({"error": "RECOVERY_FAILED", "message": "预览被清理，请重试"}), 503
         return jsonify({"error": "RECOVERY_FAILED", "message": "预览恢复失败"}), 503
 
+    def _wechat_snapshot(partial, filename):
+        """把增长中的分段 MP4 无损重封装成 faststart 快照供微信播放。
+
+        微信播放器既不支持无 Content-Length 的流，也读不了 empty moov；
+        快照按 partial 当前大小缓存，微信的每秒重试不会重复转封装。
+        """
+        from .refresh_media import _faststart_snapshot
+
+        return _faststart_snapshot(partial, filename)
+
     def _stream_growing_video(partial, filename):
-        """边转码边吐字节：浏览器拿到首个分片即可起播，不必等 playback_ready。"""
+        """边转码边吐字节：只按完整 box 边界发送，避免读到写了一半的分片。"""
+        from .refresh_media import _iter_boxes
+
         def generate():
+            pending = b""
             idle_ticks = 0
             with open(partial, "rb") as handle:
                 while True:
                     chunk = handle.read(256 * 1024)
                     if chunk:
                         idle_ticks = 0
-                        yield chunk
+                        pending += chunk
+                        boundary = 0
+                        for box, box_offset, size, header in _iter_boxes(pending, 0, len(pending)):
+                            if box_offset + size <= len(pending):
+                                boundary = box_offset + size
+                            else:
+                                break
+                        if boundary:
+                            yield pending[:boundary]
+                            pending = pending[boundary:]
                         continue
                     state = get_media_status(filename)["state"]
                     if state in ("ready", "error", "cold"):
@@ -292,7 +318,9 @@ def create_app():
                             yield rest
                         return
                     idle_ticks += 1
-                    if idle_ticks >= 100:
+                    if idle_ticks >= 6000:
+                        # 10 分钟兜底；任务存活期间流保持打开，转码慢时
+                        # 播放器缓冲等待而不是提前断流
                         return
                     time.sleep(0.1)
         return Response(
@@ -322,14 +350,28 @@ def create_app():
             if partial.exists() and partial.stat().st_size > 0:
                 touch_media_access(filename, "video")
                 if "MicroMessenger" in request.headers.get("User-Agent", ""):
-                    # 微信播放器不支持无 Content-Length 的边增长流，给快照文件
-                    return send_file(partial, mimetype="video/mp4", conditional=True)
+                    # 微信播放器不支持无 Content-Length 的边增长流，给 faststart
+                    # 快照；首个分片落盘前快照不可用，短暂轮询等待
+                    deadline = time.monotonic() + 10
+                    while time.monotonic() < deadline:
+                        snapshot = _wechat_snapshot(partial, filename)
+                        if snapshot:
+                            return send_file(snapshot, mimetype="video/mp4", conditional=True)
+                        if video_asset_is_ready(filename):
+                            ready_file = existing_video_path(filename)
+                            if ready_file:
+                                return send_file(ready_file, mimetype="video/mp4", conditional=True)
+                        time.sleep(0.25)
+                    return jsonify({"error": "RECOVERY_FAILED", "message": "视频恢复中，请重试"}), 503
                 return _stream_growing_video(partial, filename)
         if not cache_file:
             return jsonify({"error": "RECOVERY_FAILED", "message": "视频恢复失败"}), 503
         touch_media_access(filename, "video")
         mimetype = "video/mp4" if cache_file.suffix.lower() == ".mp4" else "video/quicktime"
-        return send_file(cache_file, mimetype=mimetype, conditional=True)
+        try:
+            return send_file(cache_file, mimetype=mimetype, conditional=True)
+        except FileNotFoundError:
+            return jsonify({"error": "RECOVERY_FAILED", "message": "视频被清理，请重试"}), 503
 
     @app.route("/livp/<path:filename>")
     def livp_video(filename):

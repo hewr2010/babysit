@@ -290,11 +290,11 @@ def get_media_status(filename, cache_dir=None, db_path=None):
         db.close()
     ready = video_ready if is_video else preview_ready
     state = "ready" if ready else "cold"
-    if not ready and job and job["status"] in ("queued", "processing"):
-        state = job["status"]
+    if not ready and job and job["status"] in ("queued", "processing", "streaming"):
+        state = "processing" if job["status"] == "streaming" else job["status"]
         if (
             is_video
-            and job["status"] == "processing"
+            and job["status"] in ("processing", "streaming")
             and job["playback_ready"]
             and video_file_is_valid(partial_video_path(filename, cache_dir))
         ):

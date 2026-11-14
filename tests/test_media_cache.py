@@ -455,6 +455,8 @@ def test_streaming_partial_video_status_and_route(media_env, monkeypatch):
 
     assert get_media_status("large.mp4")["state"] == "streaming"
     finish_warm_job(job["id"])
+    # 流式响应在任务存活期间保持打开；mock 掉路由内的 enqueue 避免重建任务
+    monkeypatch.setattr(app_module, "enqueue_warm", lambda *args, **kwargs: None)
     response = client.get("/video/large.mp4")
     assert response.status_code == 200
     assert response.data == partial_video_path("large.mp4").read_bytes()
@@ -504,8 +506,15 @@ def test_large_video_transcodes_first_segment_without_full_download(media_env, m
 
     assert success is True
     assert len(first_play) == 1
-    assert first_play[0].exists()
-    assert not video_output_path("large.mp4").exists()
+    # 短视频（< FIRST_PLAY_STOP_SECONDS）会自然转完并 faststart 落盘；
+    # 长视频则在首段后停在 partial。两种形态都必须可播。
+    from babysit.media_cache import video_file_is_valid
+
+    final = video_output_path("large.mp4")
+    if final.exists():
+        assert video_file_is_valid(final)
+    else:
+        assert first_play[0].exists()
 
 
 def test_cold_video_request_waits_for_first_playable_segment(media_env, monkeypatch):
@@ -528,6 +537,8 @@ def test_cold_video_request_waits_for_first_playable_segment(media_env, monkeypa
         job = claim_next_warm_job()
         write_test_video(partial_video_path(filename))
         update_warm_job_progress(job["id"], progress=5, stage="转码", playback_ready=1)
+        # 流式响应在任务存活期间保持打开，测试里直接终结任务让流结束
+        finish_warm_job(job["id"], "测试终止")
         return result
 
     monkeypatch.setattr(app_module, "enqueue_warm", recover)
@@ -648,3 +659,33 @@ def test_enforce_cache_budget_max_items_keeps_most_recent(media_env, monkeypatch
     assert preview_path("a.jpg").exists() is False
     assert preview_path("b.jpg").exists() is True
     assert preview_path("c.jpg").exists() is True
+
+
+def test_faststart_snapshot_remuxes_growing_partial(media_env, tmp_path):
+    import subprocess
+    import babysit.refresh_media as rm
+    from babysit.media_cache import partial_video_path
+
+    db_path, cache_dir = media_env
+    source = tmp_path / "src.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=20:size=320x240:rate=30",
+         "-pix_fmt", "yuv420p", "-c:v", "h264_videotoolbox", "-b:v", "2M",
+         "-movflags", "+frag_keyframe+empty_moov+default_base_moof", str(source)],
+        check=True, capture_output=True,
+    )
+    partial = partial_video_path("clip.mov", cache_dir)
+    partial.parent.mkdir(parents=True, exist_ok=True)
+    data = source.read_bytes()
+    partial.write_bytes(data[: len(data) * 3 // 5])
+
+    snapshot = rm._faststart_snapshot(partial, "clip.mov")
+
+    assert snapshot is not None and snapshot.exists()
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "json", str(snapshot)],
+        check=True, capture_output=True, text=True,
+    )
+    import json
+    assert float(json.loads(probe.stdout)["format"]["duration"]) > 5

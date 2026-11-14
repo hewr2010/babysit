@@ -10,7 +10,7 @@
 2. 如果一个模块开始变得臃肿了，需要主动地拆分成子模块
 3. 不要输出多余的 md 和报告，注释只在刁钻的逻辑处再加，不要保留行末多余空白字符
 4. 测试代码都放在 tests 文件夹
-5. 每次开发完毕，都需要使用 playwright 打开浏览器验证功能。确认你写的功能都通过测试了，再移交给用户
+5. 每次开发完毕，都需要使用 playwright 打开浏览器验证功能。确认你写的功能都通过测试了，再移交给用户。涉及媒体播放/恢复的改动，交付前必须运行 `.venv/bin/python tests/stress_cold_recovery.py --h5` 自测：模拟微信 UA 与 H5 真实点击两条链路，跨月份点击 30+ 次、视频完整播放到 ended，重点关注 TTFP（≤5s）和播放流畅度，全部通过才允许交付，不允许让用户实机发现你能自己测出的问题
 6. 测试完毕，需要把你测试用的无关紧要的文件删一删，进程回收一下
 7. **响应式样式兼容性**：调整样式时必须同时检查移动端和 PC 端（`@media (min-width: 768px)`），确保两边边距、padding 等对齐一致
 8. **CSS 对齐调试经验**：
@@ -144,7 +144,9 @@ frontend/src/
 - TTFP（首次可播放时间）是核心验收指标，目标全部场景 ≤5s。2026-11-13 实测（单次点击）：热视频 1.7s、冷照片 2.7s、2.2MB 4.2s、53MB 1.7s、655MB 2.6s、legacy 重建 3.0s。
 - 浏览即预恢复：相册月份 API 被请求时自动以低优先级（20-30，用户点击为 100）预恢复当月前 6 个视频；用户点击与后台预取由两个 worker 工位并行处理（`claim_next_warm_job` 按优先级区间认领）。
 - moov 在文件尾的 MP4/MOV（iPhone 录制普遍如此）通过 `plan_remux` 重封装为 faststart 流：并发抓头部 64KB 与尾部（按 DB file_size 预估，1/8/32MB 阶梯）定位 moov，`_patch_moov_chunk_offsets` 平移 stco/co64 偏移后前置，mdat 由 `_PrefetchReader` 后台预读（断点续传重试、128MB 缓冲上限）。任何一步不可行回退先落盘再转码。管道流式只适用于 moov 在前的文件，直接管道输入不可行（无法回 seek）。
-- `/video` 冷请求边转码边吐字节：部分文件一写出 moov 就开始流式响应（10 秒无增长自动断流兜底），浏览器拿到首个分片即起播，不等 playback_ready。
+- `/video` 冷请求边转码边吐字节：部分文件一写出 moov 就开始流式响应（10 秒无增长自动断流兜底），浏览器拿到首个分片即起播，不等 playback_ready。微信 UA 不支持无 Content-Length 的流：冷请求轮询等待首个分片后用 `_faststart_snapshot` 无损重封装出 faststart 快照（按 partial 大小缓存）返回；快照临时文件必须以 .mp4 结尾（ffmpeg 按扩展名推断封装）。
+- 大视频（≥30MB 或大小未知）转码两段式：用户点击（priority≥100）的首段任务提交到 6 线程池，转码 15 秒内容即释放（worker 提交后零阻塞）；短于 15 秒的视频自然转完直接 faststart 落盘。完整转码由 priority=50 的补全任务在后台工位串行执行，写独立临时文件（`.complete.mp4`），有用户任务排队时主动中止并让位（重新排队），不破坏首段 partial。同一文件同时只允许一个转码（文件锁），重复首段任务直接标 streaming、重复补全直接取消。任务状态含 streaming 终态（首段就绪待补全）。
+- 交付前必须运行 `tests/stress_cold_recovery.py`（微信 UA 链路）和 `--h5`（真实点击完整播放）自测，TTFP ≤5s、零异常才允许交付。
 - 下载直链内存 + SQLite（`download_url_cache` 表）双级缓存 30 分钟，避免每次冷恢复付 pcs API 往返。解码用 `-hwaccel videotoolbox`（`BABYSIT_DISABLE_HWACCEL=1` 可关），编码 macOS 用 h264_videotoolbox 1080p 上限 + `-b:v 10M -maxrate 12M`，其他平台 libx264 `-crf 19` 同码率上限，`-force_key_frames expr:gte(t,n_forced*1)` 保证 1 秒一个分片。不要用 `-q:v 80`/4K 上限（产物可达 60-90Mbps、单文件 2GB，微信 previewMedia 无法播放）。产物带 `VIDEO_CACHE_VERSION` 元数据标记（当前为 2），无标记或版本不符的缓存 `video_asset_is_ready` 判为未就绪并自动重建。
 - 大视频使用 requests 单字节流喂给 FFmpeg，输出 H.264/AAC 分段 MP4；首段可播即 `streaming`，完整缓存才为 `ready`。完整恢复不得重载播放器。网盘 CDN 对同 URL 并发 Range 请求会限速和超时，已验证不可行，不要改回并行分段下载。
 - Flask 只负责排队、状态轮询和响应，禁止在 Web 进程执行 FFmpeg、Pillow 或 ZIP 解包。所有媒体处理必须在 `refresh_media` 中完成，包括原始 `.livp` 的 MOV 解包；临时原件在响应关闭后删除。

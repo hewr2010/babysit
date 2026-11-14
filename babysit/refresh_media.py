@@ -48,6 +48,7 @@ from .media_cache import (
     init_media_cache,
     mark_video_cache_current,
     original_livp_path,
+    partial_video_path,
     preview_path,
     record_cache_assets,
     thumbnail_path,
@@ -59,6 +60,8 @@ from .media_cache import (
 # 刷新间隔（秒）
 REFRESH_INTERVAL = int(os.environ.get("BABYSIT_REFRESH_INTERVAL_SECONDS", 3 * 60))
 DISABLE_PERIODIC_REFRESH = os.environ.get("BABYSIT_DISABLE_PERIODIC_REFRESH") == "1"
+# 首段任务转码到该时长（秒）即释放，完整转码由后台补全任务执行
+FIRST_PLAY_STOP_SECONDS = 15
 
 # 支持的文件扩展名
 SUPPORTED_EXTS = (".jpg", ".jpeg", ".png", ".mp4", ".mov", ".heic", ".livp")
@@ -797,6 +800,41 @@ def build_remux_stream(url, probe):
     return _make_remux_stream(url, ftyp, moov, tail, tail_base, payload_start, payload_end)
 
 
+def _faststart_snapshot(partial, filename):
+    """把增长中的分段 MP4 重封装为 faststart 快照，按 partial 大小缓存复用。"""
+    safe_name = quote(filename, safe="")
+    try:
+        size = partial.stat().st_size
+    except OSError:
+        return None
+    snapshot_dir = CACHE_DIR / "temp_video"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    snapshot = snapshot_dir / f"wx_{safe_name}_{size}.mp4"
+    if snapshot.exists() and snapshot.stat().st_size > 0:
+        return snapshot
+    temp = snapshot_dir / f".wx_{safe_name}_{size}.partial.mp4"
+    temp.unlink(missing_ok=True)
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-i", str(partial), "-c", "copy",
+             "-movflags", "+faststart", str(temp)],
+            capture_output=True,
+            timeout=60,
+        )
+        if result.returncode != 0 or not temp.exists() or temp.stat().st_size < 512 * 1024:
+            # 小于 512KB 说明 partial 还只有 moov 头、没有完整分片
+            temp.unlink(missing_ok=True)
+            return None
+        os.replace(temp, snapshot)
+        for stale in snapshot_dir.glob(f"wx_{safe_name}_*.mp4"):
+            if stale != snapshot:
+                stale.unlink(missing_ok=True)
+        return snapshot
+    except (OSError, subprocess.SubprocessError):
+        temp.unlink(missing_ok=True)
+        return None
+
+
 def _finalize_playable_mp4(temp_output, output_path):
     """把分段 MP4 无损重写为 faststart（moov 带完整采样表置于文件头）。
 
@@ -849,9 +887,10 @@ def _video_hwaccel_args():
 def transcode_video(
     source_path, output_path, job_id=None, on_first_play=None,
     stop_after_first_play=False, abort_if=None, chunk_iter=None,
+    temp_path=None, keep_partial_on_abort=False,
 ):
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_output = output_path.with_name(f".{output_path.name}.stream.mp4")
+    temp_output = temp_path or output_path.with_name(f".{output_path.name}.stream.mp4")
     temp_output.unlink(missing_ok=True)
     scale = "scale=w='min(iw,1920)':h='min(ih,1920)':force_original_aspect_ratio=decrease:force_divisible_by=2"
     is_remote = str(source_path).startswith(("http://", "https://"))
@@ -876,6 +915,7 @@ def transcode_video(
     duration = {"seconds": 0.0}
     input_complete = not is_remote
     errors = []
+    terminated_early = {"value": False}
 
     def stream_remote_input():
         nonlocal input_complete
@@ -925,9 +965,13 @@ def transcode_video(
         update_warm_job_progress(job_id, progress=0, stage="转码", playback_ready=0)
     try:
         for line in process.stdout:
-            if abort_if and abort_if():
-                print("    ⏸️ 周期转码让位用户恢复请求")
+            if abort_if and first_play and abort_if():
+                print("    ⏸️ 转码让位用户恢复请求")
                 process.terminate()
+                process.wait()
+                if keep_partial_on_abort:
+                    return False
+                temp_output.unlink(missing_ok=True)
                 return False
             if not line.startswith("out_time_ms="):
                 continue
@@ -957,11 +1001,14 @@ def transcode_video(
                     )
                 if on_first_play:
                     on_first_play(temp_output)
-                if stop_after_first_play:
+                if stop_after_first_play and output_seconds >= FIRST_PLAY_STOP_SECONDS:
+                    terminated_early["value"] = True
                     process.terminate()
         return_code = process.wait()
         error_thread.join(timeout=2)
-        if stop_after_first_play and first_play:
+        if terminated_early["value"] and first_play:
+            return True
+        if stop_after_first_play and first_play and return_code != 0:
             return True
         if return_code != 0 or not input_complete or not temp_output.exists() or temp_output.stat().st_size == 0:
             print(f"    ❌ 视频转码失败: {'; '.join(errors)[-1500:]}")
@@ -977,14 +1024,14 @@ def transcode_video(
         if process.poll() is None:
             process.terminate()
             process.wait()
-        if not stop_after_first_play:
+        if not stop_after_first_play and not keep_partial_on_abort:
             temp_output.unlink(missing_ok=True)
 
 
 def process_streaming_video(
     file_info, thumbs_dir, previews_dir, videos_dir,
     job_id=None, on_first_play=None, stop_after_first_play=False, abort_if=None,
-    chunk_iter=None, url=None,
+    chunk_iter=None, url=None, temp_path=None, keep_partial_on_abort=False,
 ):
     filename = file_info["name"]
     safe_name = quote(filename, safe="")
@@ -1006,7 +1053,8 @@ def process_streaming_video(
     success = transcode_video(
         url, videos_dir / output_name, job_id=job_id,
         on_first_play=first_play, stop_after_first_play=stop_after_first_play,
-        abort_if=abort_if, chunk_iter=chunk_iter,
+        abort_if=abort_if, chunk_iter=chunk_iter, temp_path=temp_path,
+        keep_partial_on_abort=keep_partial_on_abort,
     )
     if success:
         file_info["processed"] = True
@@ -1017,7 +1065,8 @@ def process_streaming_video(
 def process_media_file(
     file_info, thumbs_dir, previews_dir, videos_dir, include_video=True,
     job_id=None, prefer_thumbnail=False, on_first_play=None,
-    stop_after_first_play=False, abort_if=None,
+    stop_after_first_play=False, abort_if=None, temp_path=None,
+    keep_partial_on_abort=False,
 ):
     """生成永久缩略图、预览图和可选的视频播放派生文件。"""
     filename = file_info["name"]
@@ -1050,7 +1099,8 @@ def process_media_file(
             return process_streaming_video(
                 file_info, thumbs_dir, previews_dir, videos_dir, job_id,
                 on_first_play, stop_after_first_play, abort_if,
-                chunk_iter=chunk_iter, url=url,
+                chunk_iter=chunk_iter, url=url, temp_path=temp_path,
+                keep_partial_on_abort=keep_partial_on_abort,
             )
         print("    ⏳ 无法流式转码，先落盘再转码")
 
@@ -1134,7 +1184,8 @@ def process_media_file(
                 temp_video, video_cache_path, job_id=job_id,
                 on_first_play=on_first_play,
                 stop_after_first_play=stop_after_first_play,
-                abort_if=abort_if,
+                abort_if=abort_if, temp_path=temp_path,
+                keep_partial_on_abort=keep_partial_on_abort,
             ):
                 return False, file_info
             if ext == ".livp":
@@ -1381,6 +1432,179 @@ def process_preview_from_existing(filename):
     return True
 
 
+def _mark_job_streaming(job_id):
+    db = get_standalone_db()
+    try:
+        db.execute(
+            "UPDATE media_warm_jobs SET status = 'streaming', playback_ready = 1, "
+            "stage = '可边下边播', updated_at = ? WHERE id = ?",
+            (time.time(), job_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _enqueue_completion(job):
+    """首段就绪后为完整转码排一个后台任务（不与首段任务共用槽位）。"""
+    db = get_standalone_db()
+    try:
+        active = db.execute(
+            "SELECT id FROM media_warm_jobs WHERE filename = ? AND kind = 'video' "
+            "AND status IN ('queued', 'processing') LIMIT 1",
+            (job["filename"],),
+        ).fetchone()
+        if active:
+            return
+        now = time.time()
+        db.execute(
+            "INSERT INTO media_warm_jobs "
+            "(filename, kind, priority, client_id, status, created_at, updated_at) "
+            "VALUES (?, 'video', 50, 'completion', 'queued', ?, ?)",
+            (job["filename"], now, now),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _user_job_waiting(exclude_job_id=None, exclude_filename=None):
+    query = (
+        "SELECT 1 FROM media_warm_jobs WHERE priority >= 100 AND "
+        "(status = 'queued' OR (status = 'processing' AND playback_ready = 0))"
+    )
+    params = []
+    if exclude_job_id is not None:
+        query += " AND id != ?"
+        params.append(exclude_job_id)
+    if exclude_filename is not None:
+        # 同一文件的重试/重复点击不算等待，避免转码任务被自己掐死
+        query += " AND filename != ?"
+        params.append(exclude_filename)
+    query += " LIMIT 1"
+    db = get_standalone_db()
+    try:
+        row = db.execute(query, params).fetchone()
+        return bool(row)
+    finally:
+        db.close()
+
+
+def _requeue_job(job_id, priority=50):
+    db = get_standalone_db()
+    try:
+        db.execute(
+            "UPDATE media_warm_jobs SET status = 'queued', priority = ?, error = NULL, "
+            "updated_at = ? WHERE id = ?",
+            (priority, time.time(), job_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _run_warm_job_body(job, file_info, first_play_only=False):
+    lock = _file_transcode_lock(job["filename"])
+    if not lock.acquire(blocking=False):
+        # 同一文件已有转码在进行（重复点击/补全升级导致）：首段任务直接
+        # 标记 streaming（partial 正在增长），补全任务取消，避免重复转码
+        if first_play_only:
+            _mark_job_streaming(job["id"])
+        else:
+            db = get_standalone_db()
+            try:
+                db.execute(
+                    "UPDATE media_warm_jobs SET status = 'cancelled', updated_at = ? WHERE id = ?",
+                    (time.time(), job["id"]),
+                )
+                db.commit()
+            finally:
+                db.close()
+        return
+    completion = job["client_id"] == "completion" and job["kind"] == "video"
+    temp_path = None
+    abort_if = None
+    keep_partial = False
+    if completion:
+        safe_name = quote(file_info["name"], safe="")
+        temp_path = CACHE_DIR / "videos" / f".{safe_name}.complete.mp4"
+        abort_if = lambda: _user_job_waiting(exclude_job_id=job["id"])
+    elif first_play_only:
+        abort_if = lambda: _user_job_waiting(
+            exclude_job_id=job["id"], exclude_filename=job["filename"]
+        )
+        keep_partial = True
+    try:
+        required = file_info["size"] or 0 if job["kind"] == "video" else 0
+        budget = enforce_cache_budget(required_bytes=required)
+        if not budget["within_budget"]:
+            raise RuntimeError("热数据已超过缓存容量，无法继续恢复")
+        success, _ = process_media_file(
+            file_info,
+            CACHE_DIR / "thumbs",
+            CACHE_DIR / "previews",
+            CACHE_DIR / "videos",
+            include_video=job["kind"] == "video",
+            job_id=job["id"],
+            prefer_thumbnail=False,
+            stop_after_first_play=False,
+            abort_if=abort_if,
+            temp_path=temp_path,
+            keep_partial_on_abort=keep_partial,
+        )
+        if not success:
+            if (completion or first_play_only) and _user_job_waiting(
+                exclude_job_id=job["id"], exclude_filename=job["filename"]
+            ):
+                # 用户点击优先：让位；首段任务标记 streaming 并 requeue 补全，
+                # 补全任务重新排队，partial 均不受影响
+                if first_play_only:
+                    _mark_job_streaming(job["id"])
+                    _enqueue_completion(job)
+                else:
+                    _requeue_job(job["id"])
+                return
+            raise RuntimeError("网盘下载或媒体处理失败")
+        record_cache_assets(job["filename"])
+        if completion:
+            partial_video_path(file_info["name"]).unlink(missing_ok=True)
+        if first_play_only:
+            if video_asset_is_ready(file_info["name"]):
+                finish_warm_job(job["id"])
+            else:
+                _mark_job_streaming(job["id"])
+                _enqueue_completion(job)
+        else:
+            finish_warm_job(job["id"])
+    except Exception as error:
+        finish_warm_job(job["id"], str(error))
+    finally:
+        lock.release()
+
+
+_TRANSCODE_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=6, thread_name_prefix="transcode"
+)
+_FILE_LOCKS = {}
+_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def _file_transcode_lock(filename):
+    with _FILE_LOCKS_GUARD:
+        return _FILE_LOCKS.setdefault(filename, threading.Lock())
+
+
+def _job_playback_ready(job_id):
+    db = get_standalone_db()
+    try:
+        row = db.execute(
+            "SELECT playback_ready FROM media_warm_jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+        return bool(row and row["playback_ready"])
+    finally:
+        db.close()
+
+
 def process_one_warm_job(min_priority=None, max_priority=None):
     job = claim_next_warm_job(min_priority=min_priority, max_priority=max_priority)
     if not job:
@@ -1418,26 +1642,22 @@ def process_one_warm_job(min_priority=None, max_priority=None):
         record_cache_assets(job["filename"])
         finish_warm_job(job["id"])
         return True
-    try:
-        required = row["file_size"] or 0 if job["kind"] == "video" else 0
-        budget = enforce_cache_budget(required_bytes=required)
-        if not budget["within_budget"]:
-            raise RuntimeError("热数据已超过缓存容量，无法继续恢复")
-        success, _ = process_media_file(
-            file_info,
-            CACHE_DIR / "thumbs",
-            CACHE_DIR / "previews",
-            CACHE_DIR / "videos",
-            include_video=job["kind"] == "video",
-            job_id=job["id"],
-            prefer_thumbnail=False,
+    ext = os.path.splitext(job["filename"])[1].lower()
+    big_video = job["kind"] == "video" and ext in (".mp4", ".mov") and (
+        not file_info["size"] or file_info["size"] >= 30 * 1024**2
+    )
+    if big_video and job["priority"] >= 100:
+        # 用户点击的大视频：首段转码放进线程池后立即释放 worker；转码持续
+        # 进行让 partial 不断增长，有用户任务排队时中止并让位（保留 partial）
+        _TRANSCODE_POOL.submit(_run_warm_job_body, job, file_info, True)
+        return True
+    if big_video:
+        # 预取/补全在后台工位串行执行，不占用户首段槽位
+        _run_warm_job_body(
+            job, file_info, first_play_only=job["client_id"] != "completion"
         )
-        if not success:
-            raise RuntimeError("网盘下载或媒体处理失败")
-        record_cache_assets(job["filename"])
-        finish_warm_job(job["id"])
-    except Exception as error:
-        finish_warm_job(job["id"], str(error))
+        return True
+    _run_warm_job_body(job, file_info)
     return True
 
 
@@ -1454,7 +1674,8 @@ def main():
                 print(f"用户恢复任务异常: {error}")
                 time.sleep(1)
 
-    threading.Thread(target=user_priority_worker, daemon=True).start()
+    for _ in range(3):
+        threading.Thread(target=user_priority_worker, daemon=True).start()
     next_refresh = 0
     while True:
         if not DISABLE_PERIODIC_REFRESH and time.time() >= next_refresh:
