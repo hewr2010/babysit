@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote, unquote
 import requests
-from PIL import Image
+from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS
 from pillow_heif import register_heif_opener
 from .config import CACHE_DIR, BAIDU_REMOTE_PATH, PCS_API_BASE
@@ -479,6 +479,7 @@ def get_thumbnail_data(filename, size=(200, 200)):
                     save_exif_cache(exif_cache)
 
         # 统一处理图片
+        img = ImageOps.exif_transpose(img)
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
         img.thumbnail(size, Image.Resampling.LANCZOS)

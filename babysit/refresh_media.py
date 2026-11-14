@@ -13,8 +13,11 @@
 """
 
 import argparse
+import concurrent.futures
 import io
 import os
+import sqlite3
+import struct
 import subprocess
 import sys
 import threading
@@ -36,17 +39,20 @@ register_heif_opener()
 from .config import CACHE_DIR, BAIDU_REMOTE_PATH, PCS_API_BASE, DATA_DIR
 from .db import get_standalone_db, update_media_file, delete_media_file
 from .media_cache import (
+    _connect,
     claim_next_warm_job,
     enforce_cache_budget,
     existing_video_path,
     finish_warm_job,
     has_queued_warm_job,
     init_media_cache,
+    mark_video_cache_current,
     original_livp_path,
     preview_path,
     record_cache_assets,
     thumbnail_path,
     update_warm_job_progress,
+    video_asset_is_ready,
     video_file_is_valid,
 )
 
@@ -235,6 +241,54 @@ def get_download_url(filename):
     return None, error
 
 
+_download_url_cache = {}
+_download_url_lock = threading.Lock()
+DOWNLOAD_URL_TTL = 1800
+
+
+def get_download_url_cached(filename, db_path=None):
+    """直链缓存 30 分钟（内存 + SQLite 双级），避免每次冷恢复都付一次 pcs API 往返。"""
+    now = time.time()
+    with _download_url_lock:
+        cached = _download_url_cache.get(filename)
+        if cached and cached[1] > now:
+            return cached[0], None
+    try:
+        db = _connect(db_path)
+        try:
+            row = db.execute(
+                "SELECT url, expires FROM download_url_cache WHERE filename = ?",
+                (filename,),
+            ).fetchone()
+        finally:
+            db.close()
+        if row and row[1] > now:
+            with _download_url_lock:
+                _download_url_cache[filename] = (row[0], row[1])
+            return row[0], None
+    except sqlite3.Error:
+        pass
+    url, error = get_download_url(filename)
+    if url:
+        expires = now + DOWNLOAD_URL_TTL
+        with _download_url_lock:
+            _download_url_cache[filename] = (url, expires)
+        try:
+            db = _connect(db_path)
+            try:
+                db.execute(
+                    "INSERT INTO download_url_cache (filename, url, expires) VALUES (?, ?, ?) "
+                    "ON CONFLICT(filename) DO UPDATE SET url = excluded.url, expires = excluded.expires",
+                    (filename, url, expires),
+                )
+                db.commit()
+            finally:
+                db.close()
+        except sqlite3.Error:
+            pass
+    return url, error
+
+
 def _get_thumbnail_url_once(filename):
     token = get_access_token()
     if not token:
@@ -382,22 +436,403 @@ def _write_bytes_atomic(path, data):
         temp_path.unlink(missing_ok=True)
 
 
+def _iter_boxes(data, start, end):
+    offset = start
+    while offset + 8 <= end:
+        size, box = struct.unpack(">I4s", bytes(data[offset : offset + 8]))
+        header = 8
+        if size == 1:
+            if offset + 16 > end:
+                return
+            size = struct.unpack(">Q", bytes(data[offset + 8 : offset + 16]))[0]
+            header = 16
+        elif size == 0:
+            size = end - offset
+        if size < header:
+            return
+        yield box, offset, size, header
+        if offset + size > end:
+            return
+        offset += size
+
+
+def probe_remote_mp4(url):
+    """单次 Range 请求读头部 64KB，返回 head/total/faststart；失败返回 None。
+
+    moov 在 mdat 之前为 faststart，可直接管道流式转码；否则需要尾部 moov
+    重封装或落盘。
+    """
+    try:
+        with requests.get(
+            url, headers={"Range": "bytes=0-65535"}, stream=True, timeout=(10, 30)
+        ) as response:
+            if response.status_code not in (200, 206):
+                return None
+            data = next(response.iter_content(chunk_size=65536), b"")[:65536]
+            headers = getattr(response, "headers", None) or {}
+    except requests.RequestException:
+        return None
+    total = None
+    content_range = headers.get("Content-Range")
+    if content_range and "/" in content_range:
+        try:
+            total = int(content_range.rsplit("/", 1)[1])
+        except ValueError:
+            total = None
+    faststart = False
+    for box, offset, size, header in _iter_boxes(data, 0, len(data)):
+        if box == b"moov":
+            faststart = True
+            break
+        if box == b"mdat":
+            break
+    return {"head": data, "total": total, "faststart": faststart}
+
+
+def remote_is_faststart(url):
+    probe = probe_remote_mp4(url)
+    return bool(probe and probe["faststart"])
+
+
+def _patch_moov_chunk_offsets(moov, delta):
+    """把 moov 里 stco/co64 的 chunk 偏移整体平移 delta（qt-faststart 同款）。"""
+    buf = bytearray(moov)
+    containers = {b"moov", b"trak", b"mdia", b"minf", b"stbl", b"edts", b"udta"}
+
+    def walk(start, end):
+        for box, off, size, header in _iter_boxes(buf, start, end):
+            if box in containers:
+                walk(off + header, off + size)
+            elif box in (b"stco", b"co64"):
+                base = off + header + 4
+                count = struct.unpack(">I", bytes(buf[base : base + 4]))[0]
+                width = 4 if box == b"stco" else 8
+                for i in range(count):
+                    q = base + 4 + i * width
+                    if box == b"stco":
+                        value = struct.unpack(">I", bytes(buf[q : q + 4]))[0] + delta
+                        if value > 0xFFFFFFFF:
+                            raise ValueError("stco 偏移溢出")
+                        struct.pack_into(">I", buf, q, value)
+                    else:
+                        value = struct.unpack(">Q", bytes(buf[q : q + 8]))[0] + delta
+                        struct.pack_into(">Q", buf, q, value)
+
+    first = next(_iter_boxes(buf, 0, len(buf)), None)
+    if not first or first[0] != b"moov":
+        raise ValueError("不是 moov box")
+    walk(first[3], first[2])
+    return bytes(buf)
+
+
+def _fetch_range(url, start, end, timeout=(10, 60)):
+    try:
+        with requests.get(
+            url, headers={"Range": f"bytes={start}-{end}"}, stream=True, timeout=timeout
+        ) as response:
+            if response.status_code != 206:
+                return None, None
+            data = b"".join(response.iter_content(chunk_size=256 * 1024))
+            headers = getattr(response, "headers", None) or {}
+    except requests.RequestException:
+        return None, None
+    total = None
+    content_range = headers.get("Content-Range")
+    if content_range and "/" in content_range:
+        try:
+            total = int(content_range.rsplit("/", 1)[1])
+        except ValueError:
+            total = None
+    return data, total
+
+
+def _locate_moov(tail, base, payload_end):
+    pos = tail.rfind(b"moov")
+    while pos >= 4:
+        box_start = pos - 4
+        size = struct.unpack(">I", tail[box_start : pos])[0]
+        if size == 1 and pos + 12 <= len(tail):
+            size = struct.unpack(">Q", tail[pos + 4 : pos + 12])[0]
+        if size >= 8 and box_start + size <= len(tail) and base + box_start == payload_end:
+            return tail[box_start : box_start + size], base
+        pos = tail.rfind(b"moov", 0, pos)
+    return None, None
+
+
+class _PrefetchReader:
+    """后台线程预读 Range 数据，带缓冲上限与断点续传重试，消费端按迭代器取。"""
+
+    def __init__(self, url, start, end, buffer_limit=128 * 1024 * 1024):
+        self.url = url
+        self.start = start
+        self.end = end
+        self.buffer_limit = buffer_limit
+        self.chunks = []
+        self.buffered = 0
+        self.received = 0
+        self.done = False
+        self.aborted = False
+        self.error = None
+        self.cond = threading.Condition()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _run(self):
+        last_error = None
+        for attempt in range(3):
+            try:
+                resume = self.start + self.received
+                with requests.get(
+                    self.url,
+                    headers={"Range": f"bytes={resume}-{self.end}"},
+                    stream=True,
+                    timeout=(30, 60),
+                ) as response:
+                    if response.status_code != 206:
+                        raise IOError(f"网盘 mdat 分段响应异常: {response.status_code}")
+                    for chunk in response.iter_content(chunk_size=256 * 1024):
+                        with self.cond:
+                            if self.aborted:
+                                return
+                            if not chunk:
+                                continue
+                            self.chunks.append(chunk)
+                            self.buffered += len(chunk)
+                            self.received += len(chunk)
+                            self.cond.notify_all()
+                            while self.buffered > self.buffer_limit and not self.aborted:
+                                self.cond.wait(timeout=5)
+                if self.received >= self.end - self.start + 1:
+                    break
+                raise IOError(f"网盘 mdat 数据不完整: {self.received}")
+            except (requests.RequestException, IOError) as error:
+                last_error = error
+                time.sleep(1 + attempt)
+        with self.cond:
+            if self.received < self.end - self.start + 1 and not self.aborted:
+                self.error = IOError(f"网盘 mdat 下载失败: {last_error}")
+            self.done = True
+            self.cond.notify_all()
+
+    def __iter__(self):
+        index = 0
+        while True:
+            with self.cond:
+                while index >= len(self.chunks) and not self.done and not self.aborted:
+                    self.cond.wait(timeout=5)
+                if index < len(self.chunks):
+                    chunk = self.chunks[index]
+                    self.chunks[index] = None
+                    self.buffered -= len(chunk)
+                    self.cond.notify_all()
+                else:
+                    if self.error:
+                        raise self.error
+                    return
+            yield chunk
+            index += 1
+
+    def abort(self):
+        with self.cond:
+            self.aborted = True
+            self.cond.notify_all()
+
+
+def _make_remux_stream(url, ftyp, moov, tail, tail_base, payload_start, payload_end, reader=None):
+    new_payload_start = len(ftyp) + len(moov) + 16
+    delta = new_payload_start - payload_start
+    try:
+        moov = _patch_moov_chunk_offsets(moov, delta)
+    except (ValueError, struct.error):
+        return None
+    mdat_header_new = struct.pack(">I4sQ", 1, b"mdat", 16 + (payload_end - payload_start))
+    payload_len = payload_end - payload_start
+
+    def stream():
+        yield ftyp
+        yield moov
+        yield mdat_header_new
+        if tail_base == 0:
+            yield tail[payload_start:payload_end]
+            return
+        if reader is not None:
+            yield from reader
+            return
+        last_error = None
+        received = 0
+        for attempt in range(3):
+            try:
+                resume = payload_start + received
+                with requests.get(
+                    url,
+                    headers={"Range": f"bytes={resume}-{payload_end - 1}"},
+                    stream=True,
+                    timeout=(30, 60),
+                ) as response:
+                    if response.status_code != 206:
+                        raise IOError(f"网盘 mdat 分段响应异常: {response.status_code}")
+                    for chunk in response.iter_content(chunk_size=256 * 1024):
+                        if chunk:
+                            received += len(chunk)
+                            yield chunk
+                if received != payload_len:
+                    raise IOError(f"网盘 mdat 数据不完整: {received}/{payload_len}")
+                return
+            except requests.RequestException as error:
+                last_error = error
+                time.sleep(1 + attempt)
+        raise IOError(f"网盘 mdat 下载失败: {last_error}")
+
+    return stream
+
+
+def _parse_faststart_parts(head):
+    """返回 ("faststart", ...) / (ftyp, mdat 信息) / None。"""
+    ftyp = None
+    for box, offset, size, header in _iter_boxes(head, 0, len(head)):
+        if box == b"ftyp" and ftyp is None:
+            ftyp = head[offset : offset + size]
+        elif box == b"mdat":
+            return ftyp, (offset, size, header)
+        elif box == b"moov":
+            return "faststart", None
+    return None
+
+
+def plan_remux(url, expected_size=0):
+    """并发抓头部 64KB 与尾部（按 expected_size 预估），返回：
+
+    ("faststart", None) 直接流式；（"remux", stream 工厂）；(None, None) 回退落盘。
+    """
+    head = total = tail = tail_base = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        head_future = pool.submit(_fetch_range, url, 0, 65535)
+        tail_future = None
+        if expected_size > 65536:
+            tail_future = pool.submit(
+                _fetch_range, url, expected_size - 1024 * 1024, expected_size - 1
+            )
+        head, total = head_future.result()
+        if tail_future:
+            tail, tail_total = tail_future.result()
+            if tail is not None and total and tail_total == total:
+                tail_base = total - len(tail)
+            else:
+                tail = None
+    if head is None or not total:
+        return None, None
+    parts = _parse_faststart_parts(head)
+    if parts is None:
+        return None, None
+    if parts[0] == "faststart":
+        return "faststart", None
+    ftyp, mdat = parts
+    if not ftyp:
+        return None, None
+    mdat_start, mdat_size, mdat_header = mdat
+    payload_start = mdat_start + mdat_header
+    payload_end = mdat_start + mdat_size
+
+    reader = None
+    if payload_end - payload_start > 1024 * 1024:
+        reader = _PrefetchReader(url, payload_start, payload_end - 1)
+
+    moov = None
+    if tail is not None:
+        moov, tail_base = _locate_moov(tail, tail_base, payload_end)
+    if not moov:
+        for tail_size in (1024 * 1024, 8 * 1024 * 1024, 32 * 1024 * 1024):
+            tail_size = min(tail_size, total)
+            tail, _ = _fetch_range(url, total - tail_size, total - 1)
+            if tail is None:
+                break
+            tail_base = total - len(tail)
+            moov, tail_base = _locate_moov(tail, tail_base, payload_end)
+            if moov or tail_size >= total:
+                break
+    if not moov:
+        if reader:
+            reader.abort()
+        return None, None
+    if tail_base == 0 and reader:
+        reader.abort()
+        reader = None
+    stream = _make_remux_stream(
+        url, ftyp, moov, tail, tail_base, payload_start, payload_end, reader=reader
+    )
+    return ("remux", stream) if stream else (None, None)
+
+
+def build_remux_stream(url, probe):
+    """moov 在尾的 MP4/MOV：取尾部 moov 改写偏移后前置，输出 faststart 字节流。
+
+    返回字节迭代器；任何一步不可行返回 None（调用方回退先落盘）。
+    """
+    head, total = probe["head"], probe["total"]
+    if not total:
+        return None
+    parts = _parse_faststart_parts(head)
+    if parts is None or parts[0] == "faststart":
+        return None
+    ftyp, mdat = parts
+    if not ftyp:
+        return None
+    mdat_start, mdat_size, mdat_header = mdat
+    payload_start = mdat_start + mdat_header
+    payload_end = mdat_start + mdat_size
+
+    moov = None
+    tail = b""
+    tail_base = None
+    for tail_size in (1024 * 1024, 8 * 1024 * 1024, 32 * 1024 * 1024):
+        tail_size = min(tail_size, total)
+        tail, _ = _fetch_range(url, total - tail_size, total - 1)
+        if tail is None:
+            return None
+        moov, tail_base = _locate_moov(tail, total - len(tail), payload_end)
+        if moov or tail_size >= total:
+            break
+    if not moov:
+        return None
+    return _make_remux_stream(url, ftyp, moov, tail, tail_base, payload_start, payload_end)
+
+
+def _video_encoder_args():
+    if sys.platform == "darwin" and os.environ.get("BABYSIT_DISABLE_HARDWARE_TRANSCODE") != "1":
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if "h264_videotoolbox" in result.stdout:
+            return ["h264_videotoolbox", "-q:v", "80", "-profile:v", "high", "-realtime", "0"]
+    return ["libx264", "-preset", "veryfast", "-crf", "18"]
+
+
+def _video_hwaccel_args():
+    if sys.platform == "darwin" and os.environ.get("BABYSIT_DISABLE_HWACCEL") != "1":
+        return ["-hwaccel", "videotoolbox"]
+    return []
+
+
 def transcode_video(
     source_path, output_path, job_id=None, on_first_play=None,
-    stop_after_first_play=False, abort_if=None,
+    stop_after_first_play=False, abort_if=None, chunk_iter=None,
 ):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output_path.with_name(f".{output_path.name}.stream.mp4")
     temp_output.unlink(missing_ok=True)
-    scale = "if(gt(iw,ih),min(iw,1920),-2)"
+    scale = "scale=w='min(iw,3840)':h='min(ih,3840)':force_original_aspect_ratio=decrease:force_divisible_by=2"
     is_remote = str(source_path).startswith(("http://", "https://"))
     source = "pipe:0" if is_remote else str(source_path)
     command = [
-        "ffmpeg", "-y", "-analyzeduration", "1000000", "-probesize", "1000000",
+        "ffmpeg", "-y", *_video_hwaccel_args(), "-analyzeduration", "1000000", "-probesize", "1000000",
         "-i", source, "-map", "0:v:0", "-map", "0:a:0?",
-        "-vf", f"scale=w='{scale}':h='{scale}'",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-g", "60", "-keyint_min", "30",
-        "-maxrate", "6M", "-bufsize", "12M", "-pix_fmt", "yuv420p",
+        "-vf", scale,
+        "-c:v", *_video_encoder_args(), "-g", "60", "-keyint_min", "30",
+        "-force_key_frames", "expr:gte(t,n_forced*1)",
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
         "-progress", "pipe:1", "-nostats", str(temp_output),
@@ -409,16 +844,22 @@ def transcode_video(
     process.stdout = io.TextIOWrapper(process.stdout, encoding="utf-8", errors="replace")
     process.stderr = io.TextIOWrapper(process.stderr, encoding="utf-8", errors="replace")
     duration = {"seconds": 0.0}
+    input_complete = not is_remote
     errors = []
 
     def stream_remote_input():
+        nonlocal input_complete
         try:
-            with requests.get(source_path, stream=True, timeout=(10, 30)) as response:
-                errors.append(f"输入响应: {response.status_code} {response.headers.get('Content-Type')}")
-                response.raise_for_status()
-                for chunk in response.iter_content(chunk_size=256 * 1024):
-                    if chunk:
-                        process.stdin.write(chunk)
+            if chunk_iter is not None:
+                for chunk in chunk_iter:
+                    process.stdin.write(chunk)
+            else:
+                with requests.get(source_path, stream=True, timeout=(10, 60)) as response:
+                    response.raise_for_status()
+                    for chunk in response.iter_content(chunk_size=256 * 1024):
+                        if chunk:
+                            process.stdin.write(chunk)
+            input_complete = True
         except BrokenPipeError:
             pass
         except Exception as error:
@@ -471,9 +912,12 @@ def transcode_video(
                 last_update = now
             if (
                 not first_play
-                and output_seconds >= 1.5
-                and temp_output.stat().st_size > 0
-                and video_file_is_valid(temp_output)
+                and output_seconds >= 1.0
+                and temp_output.exists()
+                and (
+                    temp_output.stat().st_size >= 1024 * 1024
+                    or video_file_is_valid(temp_output)
+                )
             ):
                 first_play = True
                 if job_id:
@@ -489,12 +933,13 @@ def transcode_video(
         error_thread.join(timeout=2)
         if stop_after_first_play and first_play:
             return True
-        if return_code != 0 or not temp_output.exists() or temp_output.stat().st_size == 0:
+        if return_code != 0 or not input_complete or not temp_output.exists() or temp_output.stat().st_size == 0:
             print(f"    ❌ 视频转码失败: {'; '.join(errors)[-1500:]}")
             return False
         if not first_play and on_first_play:
             on_first_play(temp_output)
         os.replace(temp_output, output_path)
+        mark_video_cache_current(output_path)
         if job_id:
             update_warm_job_progress(job_id, progress=100, stage="完成", playback_ready=1)
         return True
@@ -509,13 +954,15 @@ def transcode_video(
 def process_streaming_video(
     file_info, thumbs_dir, previews_dir, videos_dir,
     job_id=None, on_first_play=None, stop_after_first_play=False, abort_if=None,
+    chunk_iter=None, url=None,
 ):
     filename = file_info["name"]
     safe_name = quote(filename, safe="")
     output_name = safe_name if filename.lower().endswith(".mp4") else f"{safe_name}.mp4"
-    url, error = get_download_url(filename)
-    if error or not url:
-        return False, file_info
+    if not url:
+        url, error = get_download_url(filename)
+        if error or not url:
+            return False, file_info
 
     def first_play(partial_path):
         for directory, size in ((thumbs_dir, (200, 200)), (previews_dir, (800, 800))):
@@ -529,7 +976,7 @@ def process_streaming_video(
     success = transcode_video(
         url, videos_dir / output_name, job_id=job_id,
         on_first_play=first_play, stop_after_first_play=stop_after_first_play,
-        abort_if=abort_if,
+        abort_if=abort_if, chunk_iter=chunk_iter,
     )
     if success:
         file_info["processed"] = True
@@ -553,15 +1000,29 @@ def process_media_file(
     if prefer_thumbnail and not is_video:
         url = get_thumbnail_url(filename)
     if not url:
-        url, error = get_download_url(filename)
+        url, error = get_download_url_cached(filename)
         if error or not url:
             print(f"    ❌ 无法获取下载链接: {error}")
             return False, file_info
-    if is_video and include_video and ext in (".mp4", ".mov") and file_info.get("size", 0) >= 5 * 1024**2:
-        return process_streaming_video(
-            file_info, thumbs_dir, previews_dir, videos_dir, job_id,
-            on_first_play, stop_after_first_play, abort_if,
-        )
+    if is_video and include_video and ext in (".mp4", ".mov"):
+        is_remote = str(url).startswith(("http://", "https://"))
+        chunk_iter = None
+        use_stream = not is_remote
+        if is_remote:
+            kind, stream = plan_remux(url, file_info.get("size") or 0)
+            if kind == "faststart":
+                use_stream = True
+            elif kind == "remux":
+                chunk_iter = stream()
+                use_stream = True
+                print("    ⏳ moov 在文件尾，尾部取回前置重封装流式转码")
+        if use_stream:
+            return process_streaming_video(
+                file_info, thumbs_dir, previews_dir, videos_dir, job_id,
+                on_first_play, stop_after_first_play, abort_if,
+                chunk_iter=chunk_iter, url=url,
+            )
+        print("    ⏳ 无法流式转码，先落盘再转码")
 
     temp_dir = CACHE_DIR / "temp_video"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -736,7 +1197,7 @@ def refresh_media():
                 if thumbnail_path(filename, CACHE_DIR).is_file():
                     is_hot = file_info["date"] >= hot_cutoff
                     preview_ready = preview_path(filename, CACHE_DIR).is_file()
-                    video_ready = ext not in VIDEO_EXTS or existing_video_path(filename, CACHE_DIR)
+                    video_ready = ext not in VIDEO_EXTS or video_asset_is_ready(filename, CACHE_DIR)
                     if not is_hot or (preview_ready and video_ready):
                         record_cache_assets(filename)
                         continue
@@ -890,8 +1351,8 @@ def process_preview_from_existing(filename):
     return True
 
 
-def process_one_warm_job():
-    job = claim_next_warm_job()
+def process_one_warm_job(min_priority=None, max_priority=None):
+    job = claim_next_warm_job(min_priority=min_priority, max_priority=max_priority)
     if not job:
         return False
     db = get_standalone_db()
@@ -953,6 +1414,17 @@ def process_one_warm_job():
 def main():
     print("媒体刷新与缓存恢复服务启动")
     init_media_cache()
+
+    def user_priority_worker():
+        while True:
+            try:
+                if not process_one_warm_job(min_priority=100):
+                    time.sleep(0.2)
+            except Exception as error:
+                print(f"用户恢复任务异常: {error}")
+                time.sleep(1)
+
+    threading.Thread(target=user_priority_worker, daemon=True).start()
     next_refresh = 0
     while True:
         if not DISABLE_PERIODIC_REFRESH and time.time() >= next_refresh:
@@ -962,8 +1434,12 @@ def main():
             except Exception as error:
                 print(f"刷新失败: {error}")
             next_refresh = time.time() + REFRESH_INTERVAL
-        if not process_one_warm_job():
-            time.sleep(0.5)
+        try:
+            if not process_one_warm_job():
+                time.sleep(0.5)
+        except Exception as error:
+            print(f"后台恢复任务异常: {error}")
+            time.sleep(1)
 
 
 if __name__ == "__main__":

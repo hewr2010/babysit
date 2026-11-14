@@ -12,8 +12,10 @@ from babysit.media_cache import (
     claim_next_warm_job,
     enforce_cache_budget,
     enqueue_warm,
+    finish_warm_job,
     get_media_status,
     init_media_cache,
+    mark_video_cache_current,
     original_livp_path,
     partial_video_path,
     preview_path,
@@ -452,11 +454,13 @@ def test_streaming_partial_video_status_and_route(media_env, monkeypatch):
     update_warm_job_progress(job["id"], progress=5, stage="转码", playback_ready=1)
 
     assert get_media_status("large.mp4")["state"] == "streaming"
+    finish_warm_job(job["id"])
     response = client.get("/video/large.mp4")
     assert response.status_code == 200
     assert response.data == partial_video_path("large.mp4").read_bytes()
 
     write_test_video(video_output_path("large.mp4"))
+    mark_video_cache_current(video_output_path("large.mp4"))
     assert get_media_status("large.mp4")["state"] == "ready"
     assert client.get("/video/large.mp4").data == video_output_path("large.mp4").read_bytes()
 
@@ -511,6 +515,7 @@ def test_cold_video_request_waits_for_first_playable_segment(media_env, monkeypa
     add_media(db_path, "large.mp4", "video")
     monkeypatch.setattr(app_module, "CACHE_DIR", cache_dir)
     client = app_module.create_app().test_client()
+    write_test_video(video_output_path(filename="large.mp4"))
 
     def recover(filename, client_id, neighbors, **kwargs):
         result = enqueue_warm(
@@ -556,3 +561,87 @@ def test_original_livp_is_unpacked_without_transcoding(media_env, monkeypatch):
 
     assert success is True
     assert original_livp_path("live.livp").read_bytes() == original
+
+
+def test_legacy_video_cache_is_rebuilt(media_env):
+    db_path, _ = media_env
+    add_media(db_path, "legacy.mp4", "video")
+    output = video_output_path("legacy.mp4")
+    write_test_video(output)
+
+    assert get_media_status("legacy.mp4")["state"] == "cold"
+    enqueue_warm("legacy.mp4", "client", generation=1)
+    assert claim_next_warm_job()["status"] == "processing"
+
+    mark_video_cache_current(output)
+    assert get_media_status("legacy.mp4")["state"] == "ready"
+
+
+def test_landscape_transcode_preserves_aspect_ratio(media_env, tmp_path):
+    import json
+    import subprocess
+    import babysit.refresh_media as refresh
+
+    db_path, cache_dir = media_env
+    source = tmp_path / "landscape-source.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=3840x2160:rate=1",
+         "-pix_fmt", "yuv420p", "-y", str(source)],
+        check=True,
+        capture_output=True,
+    )
+    output = cache_dir / "videos" / "landscape.mp4"
+
+    assert refresh.transcode_video(source, output) is True
+
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=width,height", "-of", "json", str(output)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    stream = json.loads(probe.stdout)["streams"][0]
+    assert (stream["width"], stream["height"]) == (3840, 2160)
+    assert get_media_status("landscape.mp4")["video_ready"] is True
+
+
+def test_claim_next_warm_job_priority_bands(media_env):
+    db_path, cache_dir = media_env
+    add_media(db_path, "current.mp4", "video")
+    add_media(db_path, "neighbor.mp4", "video")
+    enqueue_warm(
+        "current.mp4", "client", ["neighbor.mp4"], generation=1,
+        include_neighbor_videos=True,
+    )
+
+    job = claim_next_warm_job(min_priority=100)
+    assert job["filename"] == "current.mp4"
+
+    job = claim_next_warm_job(max_priority=99)
+    assert job["filename"] == "neighbor.mp4"
+
+    assert claim_next_warm_job(min_priority=100) is None
+
+
+def test_enforce_cache_budget_max_items_keeps_most_recent(media_env, monkeypatch):
+    from babysit.media_cache import touch_media_access
+
+    db_path, cache_dir = media_env
+    monkeypatch.setenv("BABYSIT_CACHE_MAX_ITEMS", "2")
+    monkeypatch.setenv("BABYSIT_CACHE_DISABLE_PROTECTION", "1")
+    for name in ("a.jpg", "b.jpg", "c.jpg"):
+        add_media(db_path, name, "photo", date="2026-01-01")
+        target = preview_path(name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"x" * 100)
+        touch_media_access(name, "preview")
+        time.sleep(0.01)
+
+    report = enforce_cache_budget()
+
+    assert report["within_budget"] is True
+    assert {item["filename"] for item in report["deleted"]} == {"a.jpg"}
+    assert preview_path("a.jpg").exists() is False
+    assert preview_path("b.jpg").exists() is True
+    assert preview_path("c.jpg").exists() is True

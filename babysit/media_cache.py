@@ -64,6 +64,11 @@ def init_media_cache(db_path=None):
                 client_id TEXT PRIMARY KEY,
                 generation INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS download_url_cache (
+                filename TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                expires REAL NOT NULL
+            );
             """
         )
         columns = {row[1] for row in db.execute("PRAGMA table_info(media_warm_jobs)")}
@@ -117,6 +122,37 @@ def existing_video_path(filename, cache_dir=None):
         if path.is_file() and path.stat().st_size > 0:
             return path
     return None
+
+
+VIDEO_CACHE_VERSION = 1
+
+
+def video_metadata_path(video_path):
+    video_path = Path(video_path)
+    return video_path.with_name(f".{video_path.name}.json")
+
+
+def mark_video_cache_current(video_path):
+    metadata_path = video_metadata_path(video_path)
+    temp_path = metadata_path.with_name(f"{metadata_path.name}.{os.getpid()}.partial")
+    try:
+        temp_path.write_text(json.dumps({"version": VIDEO_CACHE_VERSION}))
+        os.replace(temp_path, metadata_path)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def video_asset_is_ready(filename, cache_dir=None):
+    video_path = existing_video_path(filename, cache_dir)
+    if not video_path:
+        return False
+    try:
+        metadata = json.loads(video_metadata_path(video_path).read_text())
+        if metadata.get("version") != VIDEO_CACHE_VERSION:
+            return False
+    except (OSError, ValueError, AttributeError):
+        return False
+    return video_file_is_valid(video_path)
 
 
 def _file_size(path):
@@ -245,7 +281,7 @@ def get_warm_job_error(filename, kind, db_path=None):
 def get_media_status(filename, cache_dir=None, db_path=None):
     preview_ready = image_assets_ready(filename, cache_dir)
     is_video = Path(filename).suffix.lower() in VIDEO_EXTS
-    video_ready = _file_size(existing_video_path(filename, cache_dir)) > 0
+    video_ready = video_asset_is_ready(filename, cache_dir)
     db = _connect(db_path)
     try:
         kind = "video" if is_video else "preview"
@@ -283,13 +319,14 @@ def enqueue_warm(
     include_current=True,
     include_neighbor_videos=False,
     current_kind=None,
+    current_priority=100,
     cache_dir=None,
     db_path=None,
 ):
     is_video = Path(filename).suffix.lower() in VIDEO_EXTS
     requested = []
     if include_current:
-        requested.append((filename, current_kind or ("video" if is_video else "preview"), 100))
+        requested.append((filename, current_kind or ("video" if is_video else "preview"), current_priority))
     requested.extend(
         (
             name,
@@ -327,7 +364,7 @@ def enqueue_warm(
                 )
         for name, kind, priority in requested:
             ready = (
-                video_file_is_valid(existing_video_path(name, cache_dir))
+                video_asset_is_ready(name, cache_dir)
                 if kind == "video"
                 else image_assets_ready(name, cache_dir)
             )
@@ -374,7 +411,7 @@ def _job_output_ready(job, cache_dir=None):
     if job["kind"] == "original_livp":
         return _file_size(original_livp_path(job["filename"], cache_dir)) > 0
     if job["kind"] == "video":
-        return video_file_is_valid(existing_video_path(job["filename"], cache_dir))
+        return video_asset_is_ready(job["filename"], cache_dir)
     return image_assets_ready(job["filename"], cache_dir)
 
 
@@ -426,14 +463,24 @@ def has_queued_warm_job(db_path=None):
         db.close()
 
 
-def claim_next_warm_job(cache_dir=None, db_path=None):
+def claim_next_warm_job(cache_dir=None, db_path=None, min_priority=None, max_priority=None):
     db = _connect(db_path)
     try:
         db.execute("BEGIN IMMEDIATE")
+        conditions = ["status = 'queued'"]
+        params = []
+        if min_priority is not None:
+            conditions.append("priority >= ?")
+            params.append(min_priority)
+        if max_priority is not None:
+            conditions.append("priority <= ?")
+            params.append(max_priority)
+        where = " AND ".join(conditions)
         while True:
             job = db.execute(
-                "SELECT * FROM media_warm_jobs WHERE status = 'queued' "
-                "ORDER BY priority DESC, id LIMIT 1"
+                f"SELECT * FROM media_warm_jobs WHERE {where} "
+                "ORDER BY priority DESC, id LIMIT 1",
+                params,
             ).fetchone()
             if not job:
                 db.commit()
@@ -489,6 +536,8 @@ def enforce_cache_budget(
     required_bytes=0, now=None, dry_run=False, cache_dir=None, db_path=None
 ):
     max_bytes, high_watermark, low_watermark = _cache_limits()
+    max_items = int(os.environ.get("BABYSIT_CACHE_MAX_ITEMS", "0"))
+    disable_protection = os.environ.get("BABYSIT_CACHE_DISABLE_PROTECTION") == "1"
     now = now or time.time()
     cutoff = (datetime.fromtimestamp(now) - timedelta(days=30)).date().isoformat()
     db = _connect(db_path)
@@ -530,14 +579,50 @@ def enforce_cache_budget(
                         "path": path,
                         "bytes": size,
                         "last_access": last_access,
-                        "protected": protected,
+                        "protected": protected and not disable_protection,
                     }
                 )
+
+        def evict(asset):
+            nonlocal usage
+            deleted.append({k: asset[k] for k in ("filename", "kind", "bytes")})
+            usage -= asset["bytes"]
+            if not dry_run:
+                try:
+                    asset["path"].unlink()
+                    if asset["kind"] == "video":
+                        video_metadata_path(asset["path"]).unlink(missing_ok=True)
+                except FileNotFoundError:
+                    pass
+
+        if max_items > 0:
+            items = {}
+            for asset in assets:
+                item = items.setdefault(asset["filename"], {"last_access": 0})
+                item["last_access"] = max(item["last_access"], asset["last_access"])
+            keep = set(
+                sorted(items, key=lambda name: items[name]["last_access"], reverse=True)[
+                    :max_items
+                ]
+            )
+            for asset in assets:
+                if asset["filename"] not in keep:
+                    evict(asset)
+            assets = [asset for asset in assets if asset["filename"] in keep]
+
         target = low_watermark
         if required_bytes:
             target = min(target, max_bytes - required_bytes)
         if usage + required_bytes <= high_watermark:
-            return {"usage": usage, "deleted": [], "target": target, "within_budget": True}
+            if not dry_run and deleted:
+                for item in deleted:
+                    column = f"{item['kind']}_bytes"
+                    db.execute(
+                        f"UPDATE media_cache SET {column} = 0, updated_at = ? WHERE filename = ?",
+                        (now, item["filename"]),
+                    )
+                db.commit()
+            return {"usage": usage, "deleted": deleted, "target": target, "within_budget": True}
         candidates = sorted(
             (asset for asset in assets if not asset["protected"]),
             key=lambda asset: asset["last_access"],
@@ -545,13 +630,7 @@ def enforce_cache_budget(
         for asset in candidates:
             if usage + required_bytes <= target:
                 break
-            deleted.append({k: asset[k] for k in ("filename", "kind", "bytes")})
-            usage -= asset["bytes"]
-            if not dry_run:
-                try:
-                    asset["path"].unlink()
-                except FileNotFoundError:
-                    pass
+            evict(asset)
         if not dry_run and deleted:
             for item in deleted:
                 column = f"{item['kind']}_bytes"

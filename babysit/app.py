@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import unquote, quote
 
-from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, redirect, Response
+from flask import Flask, render_template, jsonify, request, send_file, send_from_directory, redirect, Response, stream_with_context
 
 from .config import DATA_DIR, CACHE_DIR
 from .db import (init_db, close_db, get_baby, add_baby,
@@ -33,6 +33,7 @@ from .media_cache import (
     thumbnail_path,
     partial_video_path,
     touch_media_access,
+    video_asset_is_ready,
     video_file_is_valid,
 )
 
@@ -135,8 +136,29 @@ def create_app():
 
     @app.route("/api/album/<int:year>/<int:month>")
     def api_album_month(year, month):
-        """获取某月已预处理的媒体文件"""
-        return jsonify(get_processed_media_by_month(year, month))
+        """获取某月已预处理的媒体文件；顺带低优先级预恢复当月前几个视频"""
+        media = get_processed_media_by_month(year, month)
+        try:
+            videos = [
+                item["name"]
+                for day in sorted(media.keys(), reverse=True)
+                for item in media[day]
+                if item.get("type") == "video"
+            ][:6]
+            if videos:
+                enqueue_warm(
+                    videos[0],
+                    "album-prefetch",
+                    neighbors=videos[1:],
+                    generation=time.time_ns(),
+                    include_current=True,
+                    include_neighbor_videos=True,
+                    current_kind="video",
+                    current_priority=20,
+                )
+        except Exception:
+            pass
+        return jsonify(media)
 
     @app.route("/api/media/status/<path:filename>")
     def api_media_status(filename):
@@ -223,9 +245,13 @@ def create_app():
                 return
             if asset == "preview" and media_preview_path(filename).exists():
                 return
-            if asset == "video" and get_media_status(filename)["state"] in ("ready", "streaming"):
-                candidate = existing_video_path(filename) or partial_video_path(filename)
-                if candidate and video_file_is_valid(candidate):
+            if asset == "video":
+                if get_media_status(filename)["state"] == "ready":
+                    candidate = existing_video_path(filename)
+                    if candidate:
+                        return
+                candidate = partial_video_path(filename)
+                if candidate.exists() and candidate.stat().st_size > 0:
                     return
             error = get_warm_job_error(filename, kind)
             if error:
@@ -248,12 +274,39 @@ def create_app():
             return send_file(cache_file, mimetype="image/jpeg")
         return jsonify({"error": "RECOVERY_FAILED", "message": "预览恢复失败"}), 503
 
+    def _stream_growing_video(partial, filename):
+        """边转码边吐字节：浏览器拿到首个分片即可起播，不必等 playback_ready。"""
+        def generate():
+            idle_ticks = 0
+            with open(partial, "rb") as handle:
+                while True:
+                    chunk = handle.read(256 * 1024)
+                    if chunk:
+                        idle_ticks = 0
+                        yield chunk
+                        continue
+                    state = get_media_status(filename)["state"]
+                    if state in ("ready", "error", "cold"):
+                        rest = handle.read()
+                        if rest:
+                            yield rest
+                        return
+                    idle_ticks += 1
+                    if idle_ticks >= 100:
+                        return
+                    time.sleep(0.1)
+        return Response(
+            stream_with_context(generate()),
+            mimetype="video/mp4",
+            headers={"Cache-Control": "no-cache"},
+        )
+
     def serve_cached_video(filename):
         ext = os.path.splitext(filename)[1].lower()
         if ext not in (".mov", ".mp4", ".livp"):
             return jsonify({"error": "不支持的视频格式"}), 400
         cache_file = existing_video_path(filename)
-        if cache_file and not video_file_is_valid(cache_file):
+        if cache_file and not video_asset_is_ready(filename):
             cache_file = None
         if not cache_file:
             try:
@@ -262,9 +315,13 @@ def create_app():
                 return jsonify({"error": "RECOVERY_FAILED", "message": str(error)}), 503
             except FileNotFoundError:
                 return jsonify({"error": "媒体不存在"}), 404
-            cache_file = existing_video_path(filename)
-        if not cache_file and get_media_status(filename)["state"] == "streaming":
-            cache_file = partial_video_path(filename)
+            if video_asset_is_ready(filename):
+                cache_file = existing_video_path(filename)
+        if not cache_file:
+            partial = partial_video_path(filename)
+            if partial.exists() and partial.stat().st_size > 0:
+                touch_media_access(filename, "video")
+                return _stream_growing_video(partial, filename)
         if not cache_file:
             return jsonify({"error": "RECOVERY_FAILED", "message": "视频恢复失败"}), 503
         touch_media_access(filename, "video")
