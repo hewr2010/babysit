@@ -1535,6 +1535,10 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
         )
         keep_partial = True
     try:
+        if _circuit_open():
+            _requeue_job(job["id"], priority=job["priority"])
+            time.sleep(5)
+            return
         required = file_info["size"] or 0 if job["kind"] == "video" else 0
         budget = enforce_cache_budget(required_bytes=required)
         if not budget["within_budget"]:
@@ -1566,6 +1570,7 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
                 return
             raise RuntimeError("网盘下载或媒体处理失败")
         record_cache_assets(job["filename"])
+        _record_download_result(True)
         if completion:
             partial_video_path(file_info["name"]).unlink(missing_ok=True)
         if first_play_only:
@@ -1577,6 +1582,7 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
         else:
             finish_warm_job(job["id"])
     except Exception as error:
+        _record_download_result(False)
         finish_warm_job(job["id"], str(error))
     finally:
         lock.release()
@@ -1587,6 +1593,24 @@ _TRANSCODE_POOL = concurrent.futures.ThreadPoolExecutor(
 )
 _FILE_LOCKS = {}
 _FILE_LOCKS_GUARD = threading.Lock()
+_DOWNLOAD_STRIKES = {"count": 0, "open_until": 0.0}
+
+
+def _circuit_open():
+    return time.time() < _DOWNLOAD_STRIKES["open_until"]
+
+
+def _record_download_result(success):
+    """连续 3 次下载失败熔断 5 分钟：CDN 限流时不再无脑重试，让缓存内容
+    继续服务、恢复任务排队等待，避免加重限流。"""
+    if success:
+        _DOWNLOAD_STRIKES["count"] = 0
+        return
+    _DOWNLOAD_STRIKES["count"] += 1
+    if _DOWNLOAD_STRIKES["count"] >= 3:
+        _DOWNLOAD_STRIKES["open_until"] = time.time() + 300
+        _DOWNLOAD_STRIKES["count"] = 0
+        print("    ⛔ 网盘下载连续失败，熔断 5 分钟")
 
 
 def _file_transcode_lock(filename):
