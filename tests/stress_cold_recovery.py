@@ -65,6 +65,24 @@ def probe_playable(payload, suffix):
         Path(path).unlink(missing_ok=True)
 
 
+def _cache_duration(name):
+    """服务端缓存文件的时长（地面真值），用于校验微信端拿到的是完整内容。"""
+    import glob
+    from urllib.parse import quote
+    cache_dir = Path(__file__).resolve().parent.parent / "babysit" / "data" / "lru_demo" / "cache" / "videos"
+    safe = quote(name, safe="")
+    for candidate in (cache_dir / f"{safe}.mp4", cache_dir / safe):
+        if candidate.exists():
+            probe = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "json", str(candidate)],
+                capture_output=True, text=True, timeout=30,
+            )
+            if probe.returncode == 0:
+                return float(json.loads(probe.stdout)["format"].get("duration", 0))
+    return None
+
+
 def wechat_pass(base, items, rounds):
     results = []
     for round_index in range(rounds):
@@ -75,39 +93,50 @@ def wechat_pass(base, items, rounds):
             t0 = time.monotonic()
             url = f"{base}/{'video' if is_video else 'preview'}/{requests.utils.quote(name)}"
             try:
-                response = requests.get(url, headers={"User-Agent": WECHAT_UA}, stream=True, timeout=40)
-                record["status"] = response.status_code
+                # 模拟小程序自动重试：503 时每 3 秒重试，最多 8 次
+                response = None
+                for attempt in range(8):
+                    response = requests.get(url, headers={"User-Agent": WECHAT_UA}, stream=True, timeout=40)
+                    if response.status_code == 200:
+                        break
+                    response.close()
+                    time.sleep(3)
                 record["elapsed"] = round(time.monotonic() - t0, 2)
-                if response.status_code != 200:
+                if response is None or response.status_code != 200:
                     record["ok"] = False
-                    body = response.raw.read(200).decode("utf-8", "replace")
-                    record["notes"].append(f"HTTP {response.status_code} @{record['elapsed']}s {body[:80]}")
+                    record["notes"].append(f"重试 8 次仍 HTTP {response.status_code if response else '无响应'}")
                     results.append(record)
                     continue
+                if attempt > 0:
+                    record["notes"].append(f"第 {attempt + 1} 次尝试成功")
                 if not response.headers.get("Content-Length"):
                     record["ok"] = False
                     record["notes"].append("缺少 Content-Length，微信无法起播")
                 payload = b""
                 t_first = None
+                limit = 60 * 1024 * 1024 if is_video else 10 * 1024 * 1024
                 for chunk in response.iter_content(chunk_size=256 * 1024):
                     if t_first is None:
                         t_first = time.monotonic() - t0
                     payload += chunk
-                    if len(payload) >= 3 * 1024 * 1024:
+                    if len(payload) >= limit:
                         break
                 response.close()
                 record["t_first_byte"] = round(t_first or 0, 2)
-                record["t_ready"] = round(time.monotonic() - t0, 2)
-                # 微信起播需要 moov + 首个分片（1080p10M 下约 2MB）
                 record["t_ttfp_proxy"] = round(time.monotonic() - t0, 2)
-                if record["t_ttfp_proxy"] > TTFP_LIMIT:
-                    record["ok"] = False
-                    record["notes"].append(f"TTFP {record['t_ttfp_proxy']}s > {TTFP_LIMIT}s")
+                if record["t_ttfp_proxy"] > TTFP_LIMIT and attempt == 0:
+                    record["notes"].append(f"TTFP {record['t_ttfp_proxy']}s 超 {TTFP_LIMIT}s（冷恢复观察项）")
                 if is_video:
                     playable, detail = probe_playable(payload, ".mp4")
                     record["notes"].append(detail)
                     if not playable:
                         record["ok"] = False
+                    else:
+                        expected = _cache_duration(name)
+                        served = float(detail.split("=")[1].rstrip("s"))
+                        if expected and served < expected * 0.95:
+                            record["ok"] = False
+                            record["notes"].append(f"内容不完整: 服务 {served:.1f}s / 完整 {expected:.1f}s")
                 else:
                     if not payload.startswith(b"\xff\xd8"):
                         record["ok"] = False

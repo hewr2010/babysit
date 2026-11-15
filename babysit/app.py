@@ -350,18 +350,16 @@ def create_app():
             if partial.exists() and partial.stat().st_size > 0:
                 touch_media_access(filename, "video")
                 if "MicroMessenger" in request.headers.get("User-Agent", ""):
-                    # 微信播放器不支持无 Content-Length 的边增长流，给 faststart
-                    # 快照；首个分片落盘前快照不可用，短暂轮询等待
-                    deadline = time.monotonic() + 10
+                    # 微信 previewMedia 只能播静态完整文件：快照只有前几帧内容，
+                    # 播完定格体验极差。冷文件轮询等完整就绪，不就绪返回 503
+                    # 由小程序自动重试
+                    deadline = time.monotonic() + 12
                     while time.monotonic() < deadline:
-                        snapshot = _wechat_snapshot(partial, filename)
-                        if snapshot:
-                            return send_file(snapshot, mimetype="video/mp4", conditional=True)
                         if video_asset_is_ready(filename):
                             ready_file = existing_video_path(filename)
                             if ready_file:
                                 return send_file(ready_file, mimetype="video/mp4", conditional=True)
-                        time.sleep(0.25)
+                        time.sleep(0.5)
                     return jsonify({"error": "RECOVERY_FAILED", "message": "视频恢复中，请重试"}), 503
                 return _stream_growing_video(partial, filename)
         if not cache_file:
