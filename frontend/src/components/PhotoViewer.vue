@@ -28,7 +28,7 @@
                 <div class="spinner"></div>
                 <span>加载中...</span>
               </div>
-              <SlideContent v-else :photo="currentPhoto" :is-current="true" @loaded="loading = false" @error="onSlideError" @zoom-change="isZoomed = $event" />
+              <SlideContent v-else :photo="currentPhoto" :is-current="true" @loaded="onSlideLoaded" @error="onSlideError" @zoom-change="isZoomed = $event" />
             </div>
 
             <!-- 下一张 -->
@@ -123,6 +123,11 @@ const route = useRoute()
 const router = useRouter()
 
 const loading = ref(true)
+
+function onSlideLoaded() {
+  loading.value = false
+  if (currentPhoto.value) store.markMediaReady(currentPhoto.value.name)
+}
 const loadError = ref('')
 const isDownloading = ref(false)
 const isZoomed = ref(false)

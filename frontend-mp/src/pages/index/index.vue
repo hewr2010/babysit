@@ -28,6 +28,7 @@ import GrowthSection from '@/components/GrowthSection.vue'
 import MilestoneSection from '@/components/MilestoneSection.vue'
 import NativeTabBar from '@/components/NativeTabBar.vue'
 import { useAppStore } from '@/stores/app'
+import { request } from '@/services/api'
 import { nativePreviewOptions, previewUrl, thumbUrl } from '@/services/media'
 import { requireAuth } from '@/services/auth'
 import { mediaSharePath } from '@/utils/share'
@@ -89,6 +90,21 @@ function showRecordOptions() {
   })
 }
 
+function watchRecovery(item) {
+  // 恢复完成后端状态翻转，就地更新条目让「点击恢复」角标消失
+  const timer = setInterval(async () => {
+    try {
+      const status = await request(`/media/status/${encodeURIComponent(item.name)}`)
+      const done = item.type === 'video' ? status.video_ready : status.preview_ready
+      if (done) {
+        store.markMediaReady(item.name, status)
+        clearInterval(timer)
+      }
+    } catch (error) { /* 网络抖动时下一轮再试 */ }
+  }, 3000)
+  setTimeout(() => clearInterval(timer), 300000)
+}
+
 function openMedia(index, attempt = 0) {
   const item = store.media[index]
   const cold = item && (item.type === 'video' ? item.video_ready === false : item.preview_ready === false)
@@ -98,6 +114,7 @@ function openMedia(index, attempt = 0) {
       icon: 'none',
       duration: 2500
     })
+    watchRecovery(item)
   }
   uni.previewMedia({
     ...nativePreviewOptions(store.media, index),

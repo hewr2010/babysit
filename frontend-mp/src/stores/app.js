@@ -71,6 +71,17 @@ export const useAppStore = defineStore('app', () => {
     await loadAlbum()
   }
 
+  function markMediaReady(name, status = {}) {
+    for (const date of Object.keys(albumByDate.value)) {
+      const item = albumByDate.value[date].find(entry => entry.name === name)
+      if (item) {
+        item.preview_ready = status.preview_ready !== false
+        item.video_ready = status.video_ready !== false
+        return
+      }
+    }
+  }
+
   async function openMediaMonth(item) {
     if (!item.date) return -1
     const [itemYear, itemMonth] = item.date.split('-').map(Number)
@@ -91,6 +102,7 @@ export const useAppStore = defineStore('app', () => {
     year,
     month,
     albumByDate,
+    markMediaReady,
     growthRecords,
     milestones,
     albumLoading,
