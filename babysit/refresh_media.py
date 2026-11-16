@@ -16,6 +16,7 @@ import argparse
 import concurrent.futures
 import io
 import os
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -52,9 +53,11 @@ from .media_cache import (
     preview_path,
     record_cache_assets,
     thumbnail_path,
+    touch_media_access,
     update_warm_job_progress,
     video_asset_is_ready,
     video_file_is_valid,
+    video_metadata_path,
 )
 
 # 刷新间隔（秒）
@@ -892,6 +895,13 @@ def transcode_video(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temp_output = temp_path or output_path.with_name(f".{output_path.name}.stream.mp4")
     temp_output.unlink(missing_ok=True)
+    safe_stem = output_path.name
+    if safe_stem.endswith(".mp4"):
+        safe_stem = safe_stem[:-4]
+    hls_dir = output_path.parent / "hls" / safe_stem
+    if hls_dir.exists():
+        shutil.rmtree(hls_dir, ignore_errors=True)
+    hls_dir.mkdir(parents=True, exist_ok=True)
     scale = "scale=w='min(iw,1920)':h='min(ih,1920)':force_original_aspect_ratio=decrease:force_divisible_by=2"
     is_remote = str(source_path).startswith(("http://", "https://"))
     source = "pipe:0" if is_remote else str(source_path)
@@ -906,9 +916,28 @@ def transcode_video(
         "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
         "-progress", "pipe:1", "-nostats", str(temp_output),
     ]
+    # HLS 用独立进程：tee 复用器会损坏分段 MP4 子输出（实测无流），
+    # 两个进程共享同一输入，各自正确产出
+    hls_command = [
+        "ffmpeg", "-y", *_video_hwaccel_args(), "-analyzeduration", "1000000", "-probesize", "1000000",
+        "-i", source, "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", scale,
+        "-c:v", *_video_encoder_args(), "-g", "60", "-keyint_min", "30",
+        "-force_key_frames", "expr:gte(t,n_forced*1)",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-b:a", "128k",
+        "-f", "hls", "-hls_time", "1", "-hls_list_size", "0",
+        "-hls_playlist_type", "event",
+        "-hls_segment_filename", str(hls_dir / "seg_%05d.ts"),
+        str(hls_dir / "index.m3u8"),
+    ]
     process = subprocess.Popen(
         command, stdin=subprocess.PIPE if is_remote else None,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    hls_process = subprocess.Popen(
+        hls_command, stdin=subprocess.PIPE if is_remote else None,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )
     process.stdout = io.TextIOWrapper(process.stdout, encoding="utf-8", errors="replace")
     process.stderr = io.TextIOWrapper(process.stderr, encoding="utf-8", errors="replace")
@@ -917,28 +946,42 @@ def transcode_video(
     errors = []
     terminated_early = {"value": False}
 
+    def _write_stdin(proc, chunk):
+        if proc.stdin and proc.poll() is None:
+            try:
+                proc.stdin.write(chunk)
+            except (BrokenPipeError, OSError):
+                pass
+
+    def _close_stdin(proc):
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+
     def stream_remote_input():
         nonlocal input_complete
         try:
             if chunk_iter is not None:
                 for chunk in chunk_iter:
-                    process.stdin.write(chunk)
+                    _write_stdin(process, chunk)
+                    _write_stdin(hls_process, chunk)
             else:
                 with requests.get(source_path, stream=True, timeout=(10, 60)) as response:
                     response.raise_for_status()
                     for chunk in response.iter_content(chunk_size=256 * 1024):
                         if chunk:
-                            process.stdin.write(chunk)
+                            _write_stdin(process, chunk)
+                            _write_stdin(hls_process, chunk)
             input_complete = True
         except BrokenPipeError:
             pass
         except Exception as error:
             errors.append(f"网盘输入失败: {error}")
         finally:
-            try:
-                process.stdin.close()
-            except (BrokenPipeError, OSError):
-                pass
+            _close_stdin(process)
+            _close_stdin(hls_process)
 
     input_thread = threading.Thread(target=stream_remote_input, daemon=True) if is_remote else None
     if input_thread:
@@ -968,7 +1011,9 @@ def transcode_video(
             if abort_if and first_play and abort_if():
                 print("    ⏸️ 转码让位用户恢复请求")
                 process.terminate()
+                hls_process.terminate()
                 process.wait()
+                hls_process.wait()
                 if keep_partial_on_abort:
                     return False
                 temp_output.unlink(missing_ok=True)
@@ -1005,6 +1050,7 @@ def transcode_video(
                     terminated_early["value"] = True
                     process.terminate()
         return_code = process.wait()
+        hls_process.wait()
         error_thread.join(timeout=2)
         if terminated_early["value"] and first_play:
             return True
@@ -1024,6 +1070,9 @@ def transcode_video(
         if process.poll() is None:
             process.terminate()
             process.wait()
+        if hls_process.poll() is None:
+            hls_process.terminate()
+            hls_process.wait()
         if not stop_after_first_play and not keep_partial_on_abort:
             temp_output.unlink(missing_ok=True)
 
@@ -1469,11 +1518,13 @@ def _enqueue_completion(job):
 
 
 def _user_job_waiting(exclude_job_id=None, exclude_filename=None):
+    # 只统计 2 分钟内创建的 queued 任务：守护进程被 kill 后残留的
+    # processing/queued 任务不代表有真实用户等待，不应触发让位
     query = (
-        "SELECT 1 FROM media_warm_jobs WHERE priority >= 100 AND "
-        "(status = 'queued' OR (status = 'processing' AND playback_ready = 0))"
+        "SELECT 1 FROM media_warm_jobs WHERE priority >= 100 AND created_at > ? AND "
+        "status = 'queued'"
     )
-    params = []
+    params = [time.time() - 120]
     if exclude_job_id is not None:
         query += " AND id != ?"
         params.append(exclude_job_id)
@@ -1569,6 +1620,11 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
                     _requeue_job(job["id"])
                 return
             raise RuntimeError("网盘下载或媒体处理失败")
+        # 新恢复的条目立即刷新访问时间，避免被并发 LRU 预算检查当作
+        # 冷数据立刻清掉（last_access 还是上一个周期的）
+        touch_media_access(
+            job["filename"], "video" if job["kind"] == "video" else "preview"
+        )
         record_cache_assets(job["filename"])
         _record_download_result(True)
         if completion:
@@ -1580,6 +1636,13 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
                 _mark_job_streaming(job["id"])
                 _enqueue_completion(job)
         else:
+            if job["kind"] == "video" and not video_asset_is_ready(job["filename"]):
+                output = existing_video_path(job["filename"])
+                print(
+                    f"    🔍 就绪检查失败: output={bool(output and output.exists())} "
+                    f"meta={video_metadata_path(output).exists() if output else '-'} "
+                    f"valid={video_file_is_valid(output) if output and output.exists() else '-'}"
+                )
             finish_warm_job(job["id"])
     except Exception as error:
         _record_download_result(False)

@@ -21,6 +21,7 @@ from .db import (init_db, close_db, get_baby, add_baby,
 from .utils import calculate_age
 from .baidu import get_file_info, run_bypy
 from .media_cache import (
+    hls_dir,
     enqueue_original_livp,
     enqueue_warm,
     existing_video_path,
@@ -374,6 +375,22 @@ def create_app():
     @app.route("/livp/<path:filename>")
     def livp_video(filename):
         return serve_cached_video(filename)
+
+    @app.route("/hls/<path:filename>/<path:segment>")
+    def hls_segment(filename, segment):
+        if segment != "index.m3u8" and not segment.startswith("seg_"):
+            return jsonify({"error": "Not found"}), 404
+        file_path = hls_dir(filename) / segment
+        if not file_path.is_file():
+            return jsonify({"error": "Not found"}), 404
+        mimetype = (
+            "application/vnd.apple.mpegurl"
+            if segment.endswith(".m3u8")
+            else "video/mp2t"
+        )
+        response = send_file(file_path, mimetype=mimetype)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
     @app.route("/video/<path:filename>")
     def video_proxy(filename):

@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import time
@@ -110,6 +111,16 @@ def video_candidates(filename, cache_dir=None):
 
 def video_output_path(filename, cache_dir=None):
     return video_candidates(filename, cache_dir)[0]
+
+
+def hls_dir(filename, cache_dir=None):
+    output = video_output_path(filename, cache_dir)
+    stem = output.name[:-4] if output.name.endswith(".mp4") else output.name
+    return output.parent / "hls" / stem
+
+
+def hls_playlist_path(filename, cache_dir=None):
+    return hls_dir(filename, cache_dir) / "index.m3u8"
 
 
 def partial_video_path(filename, cache_dir=None):
@@ -290,6 +301,7 @@ def get_media_status(filename, cache_dir=None, db_path=None):
         db.close()
     ready = video_ready if is_video else preview_ready
     state = "ready" if ready else "cold"
+    hls_ready = is_video and hls_playlist_path(filename, cache_dir).exists()
     if not ready and job and job["status"] in ("queued", "processing", "streaming"):
         state = "processing" if job["status"] == "streaming" else job["status"]
         if (
@@ -307,6 +319,7 @@ def get_media_status(filename, cache_dir=None, db_path=None):
         "state": state,
         "preview_ready": preview_ready,
         "video_ready": video_ready if is_video else None,
+        "hls_ready": hls_ready,
         "job": dict(job) if job else None,
     }
 
@@ -592,6 +605,7 @@ def enforce_cache_budget(
                     asset["path"].unlink()
                     if asset["kind"] == "video":
                         video_metadata_path(asset["path"]).unlink(missing_ok=True)
+                        shutil.rmtree(hls_dir(asset["filename"], cache_dir), ignore_errors=True)
                 except FileNotFoundError:
                     pass
 
