@@ -22,6 +22,7 @@ from .utils import calculate_age
 from .baidu import get_file_info, run_bypy
 from .media_cache import (
     hls_dir,
+    hls_playlist_path,
     enqueue_original_livp,
     enqueue_warm,
     existing_video_path,
@@ -254,6 +255,8 @@ def create_app():
                 candidate = partial_video_path(filename)
                 if candidate.exists() and candidate.stat().st_size > 0:
                     return
+                if hls_playlist_path(filename).exists():
+                    return
             error = get_warm_job_error(filename, kind)
             if error:
                 raise RuntimeError(error)
@@ -351,15 +354,16 @@ def create_app():
             if partial.exists() and partial.stat().st_size > 0:
                 touch_media_access(filename, "video")
                 if "MicroMessenger" in request.headers.get("User-Agent", ""):
-                    # 微信 previewMedia 只能播静态完整文件：快照只有前几帧内容，
-                    # 播完定格体验极差。冷文件轮询等完整就绪，不就绪返回 503
-                    # 由小程序自动重试
+                    # 微信 previewMedia 只能播静态文件：完整就绪直接给 MP4；
+                    # 网盘转码 HLS 就绪则 302 过去边下边播；否则轮询等待
                     deadline = time.monotonic() + 25
                     while time.monotonic() < deadline:
                         if video_asset_is_ready(filename):
                             ready_file = existing_video_path(filename)
                             if ready_file:
                                 return send_file(ready_file, mimetype="video/mp4", conditional=True)
+                        if hls_playlist_path(filename).exists():
+                            return redirect(f"/hls/{quote(filename, safe='')}/index.m3u8")
                         time.sleep(0.5)
                     return jsonify({"error": "RECOVERY_FAILED", "message": "视频恢复中，请重试"}), 503
                 return _stream_growing_video(partial, filename)

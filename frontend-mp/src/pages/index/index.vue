@@ -29,7 +29,7 @@ import MilestoneSection from '@/components/MilestoneSection.vue'
 import NativeTabBar from '@/components/NativeTabBar.vue'
 import { useAppStore } from '@/stores/app'
 import { request } from '@/services/api'
-import { nativePreviewOptions, previewUrl, thumbUrl } from '@/services/media'
+import { hlsUrl, nativePreviewOptions, previewUrl, thumbUrl } from '@/services/media'
 import { requireAuth } from '@/services/auth'
 import { mediaSharePath } from '@/utils/share'
 
@@ -90,11 +90,40 @@ function showRecordOptions() {
   })
 }
 
+function openWithHls(index, item) {
+  const options = nativePreviewOptions(store.media, index)
+  const position = options.sources.findIndex(source => source.url.includes(encodeURIComponent(item.name)))
+  if (position >= 0) {
+    options.sources[position] = { ...options.sources[position], url: hlsUrl(item) }
+  }
+  uni.previewMedia({
+    ...options,
+    fail: () => setTimeout(() => openMedia(index, 1), 3000)
+  })
+}
+
 async function pollUntilReady(item, index) {
   const deadline = Date.now() + 180000
   while (Date.now() < deadline) {
     try {
       const status = await request(`/media/status/${encodeURIComponent(item.name)}`)
+      if (status.state === 'hls_failed') {
+        uni.hideLoading()
+        store.markMediaReady(item.name, { preview_ready: true, video_ready: false })
+        uni.showModal({
+          title: '拉流失败',
+          content: '该视频码率过高，在线低清流转码中，请稍后再试。封面图可正常查看。',
+          confirmText: '知道了',
+          showCancel: false
+        })
+        return
+      }
+      if (item.type === 'video' && status.hls_ready && !status.video_ready) {
+        // HLS 分段边转边播：起播只等前几个分段，完整内容随转码增长
+        uni.hideLoading()
+        openWithHls(index, item)
+        return
+      }
       const done = item.type === 'video' ? status.video_ready : status.preview_ready
       if (done) {
         store.markMediaReady(item.name, status)

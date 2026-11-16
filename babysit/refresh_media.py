@@ -333,6 +333,7 @@ def get_thumbnail_url(filename):
 
 
 def _download_to_file(url, dest_path, timeout=120, job_id=None):
+    _dl_t0 = time.monotonic()
     """流式下载文件到本地，避免把整个文件载入内存"""
     try:
         with requests.get(url, stream=True, timeout=timeout) as resp:
@@ -887,6 +888,163 @@ def _video_hwaccel_args():
     return []
 
 
+_CDN_SPEED = {"bytes": 0.0, "seconds": 0.0}
+
+
+def _record_cdn_sample(nbytes, seconds):
+    if seconds > 0 and nbytes > 0:
+        _CDN_SPEED["bytes"] += nbytes
+        _CDN_SPEED["seconds"] += seconds
+
+
+def _cdn_speed_bps():
+    """网盘下载速度估计（字节/秒），默认按限流后的 2MB/s 保守估计。"""
+    if _CDN_SPEED["seconds"] >= 5:
+        return max(_CDN_SPEED["bytes"] / _CDN_SPEED["seconds"], 512 * 1024)
+    return 2 * 1024 * 1024
+
+
+def _mvhd_duration(moov):
+    """从 moov 字节里解析 mvhd 时长（秒），失败返回 None。"""
+    idx = moov.find(b"mvhd")
+    if idx < 0 or idx + 32 > len(moov):
+        return None
+    version = moov[idx + 4]
+    try:
+        if version == 1:
+            timescale = struct.unpack(">I", moov[idx + 24 : idx + 28])[0]
+            duration = struct.unpack(">Q", moov[idx + 28 : idx + 36])[0]
+        else:
+            timescale = struct.unpack(">I", moov[idx + 16 : idx + 20])[0]
+            duration = struct.unpack(">I", moov[idx + 20 : idx + 24])[0]
+        return duration / timescale if timescale else None
+    except struct.error:
+        return None
+
+
+def _probe_source_duration(url, expected_size):
+    """用 remux 探测拿到的 moov 解析源时长（头或尾），失败返回 None。"""
+    probe = probe_remote_mp4(url)
+    if not probe or not probe["total"]:
+        return None
+    if probe["faststart"]:
+        for box, offset, size, header in _iter_boxes(probe["head"], 0, len(probe["head"])):
+            if box == b"moov":
+                return _mvhd_duration(probe["head"][offset : offset + size])
+        return None
+    tail, _ = _fetch_range(url, max(0, probe["total"] - 1024 * 1024), probe["total"] - 1)
+    if not tail:
+        return None
+    pos = tail.rfind(b"moov")
+    while pos >= 4:
+        box_start = pos - 4
+        size = struct.unpack(">I", tail[box_start : pos])[0]
+        if size == 1 and pos + 12 <= len(tail):
+            size = struct.unpack(">Q", tail[pos + 4 : pos + 12])[0]
+        if size >= 8 and box_start + size <= len(tail):
+            return _mvhd_duration(tail[box_start : box_start + size])
+        pos = tail.rfind(b"moov", 0, pos)
+    return None
+
+
+def must_use_online_hls(file_info, url):
+    """规则：源码率 > 限流速度 70% 且大小超阈值 → 强制在线低清流，不拖完整原片。"""
+    size = file_info.get("size") or 0
+    # ≥30MB 的 iPhone 视频几乎都是高码率 4K，直接强制在线低清流；
+    # 不做时长探测（探测本身在限流下要 2-3s，会拖垮 TTFP）
+    return size >= 30 * 1024 * 1024
+
+
+def recover_via_baidu_hls(file_info, output_path, job_id=None):
+    """优先用百度平台侧转码的 HLS 恢复：分段直接落盘即微信可播，完成后
+    remux 出 MP4。返回 True/False（无可用转码或失败）。"""
+    from .baidu import get_baidu_hls
+
+    name = file_info["name"]
+    t_start = time.monotonic()
+    first_playable_deadline = t_start + 4.5
+    playlist = segments = None
+    status, playlist, segments = get_baidu_hls(name)
+    if not segments:
+        return "transcoding" if status == "transcoding" else False
+    segment_urls = segments
+    extinf = [
+        float(line.split(":", 1)[1].rstrip(","))
+        for line in playlist.splitlines()
+        if line.startswith("#EXTINF:")
+    ]
+    safe_stem = output_path.name
+    if safe_stem.endswith(".mp4"):
+        safe_stem = safe_stem[:-4]
+    hls_dir = output_path.parent / "hls" / safe_stem
+    if hls_dir.exists():
+        shutil.rmtree(hls_dir, ignore_errors=True)
+    hls_dir.mkdir(parents=True, exist_ok=True)
+    print(f"    📡 使用网盘转码 HLS（{len(segment_urls)} 段）")
+
+    downloaded = []
+    for index, seg_url in enumerate(segment_urls):
+        target = hls_dir / f"seg_{index:05d}.ts"
+        body = None
+        for attempt in range(2):
+            try:
+                seg_t0 = time.monotonic()
+                response = requests.get(seg_url, timeout=(5, 10))
+                if response.status_code == 200 and response.content:
+                    body = response.content
+                    _record_cdn_sample(len(body), time.monotonic() - seg_t0)
+                    break
+            except requests.RequestException:
+                time.sleep(1)
+        if body is None:
+            print(f"    ❌ 分段 {index} 下载失败，回退原片转码")
+            shutil.rmtree(hls_dir, ignore_errors=True)
+            return False
+        if index == 0 and time.monotonic() > first_playable_deadline:
+            print("    ⏱️ 首段超时（CDN 限流），降级拉流失败")
+            shutil.rmtree(hls_dir, ignore_errors=True)
+            return "slow"
+        target.write_bytes(body)
+        downloaded.append(target)
+        # 播放列表随分段增长（event 风格，微信边下边播）
+        lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:15",
+                 "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PLAYLIST-TYPE:EVENT"]
+        for seg_i, seg in enumerate(downloaded):
+            duration = extinf[seg_i] if seg_i < len(extinf) else 10
+            lines.append(f"#EXTINF:{duration},")
+            lines.append(seg.name)
+        playlist_tmp = hls_dir / "index.m3u8.tmp"
+        playlist_tmp.write_text("\n".join(lines) + "\n")
+        os.replace(playlist_tmp, hls_dir / "index.m3u8")
+        if job_id:
+            update_warm_job_progress(
+                job_id, progress=round((index + 1) / len(segment_urls) * 100, 1),
+                stage="网盘转码分段下载", playback_ready=1,
+            )
+
+    # 补 ENDLIST
+    lines.append("#EXT-X-ENDLIST")
+    (hls_dir / "index.m3u8").write_text("\n".join(lines) + "\n")
+
+    # remux 出 MP4（H5 流式播放/下载/就绪态用）
+    concat = hls_dir / "concat.txt"
+    concat.write_text("".join(f"file '{seg.name}'\n" for seg in downloaded))
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
+             "-c", "copy", "-movflags", "+faststart", str(output_path)],
+            capture_output=True, timeout=300,
+        )
+        if result.returncode != 0 or not output_path.exists():
+            return False
+        mark_video_cache_current(output_path)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+    finally:
+        concat.unlink(missing_ok=True)
+
+
 def transcode_video(
     source_path, output_path, job_id=None, on_first_play=None,
     stop_after_first_play=False, abort_if=None, chunk_iter=None,
@@ -1132,6 +1290,32 @@ def process_media_file(
         if error or not url:
             print(f"    ❌ 无法获取下载链接: {error}")
             return False, file_info
+
+    # 视频优先用百度平台侧转码的 HLS 恢复：分段即下即播，不必拖 GB 级原片。
+    # 高码率大文件强制走 HLS（规则：源码率 > 限流速度 70% 且大小超阈值），
+    # HLS 持续不可用则标记拉流失败，绝不下载完整原片
+    if is_video and include_video:
+        safe_stem = quote(filename, safe="")
+        output_name = safe_stem if ext == ".mp4" else f"{safe_stem}.mp4"
+        video_cache_path = videos_dir / output_name
+        must_hls = str(url).startswith(("http://", "https://")) and must_use_online_hls(file_info, url)
+        hls_outcome = recover_via_baidu_hls(file_info, video_cache_path, job_id=job_id)
+        if hls_outcome is True:
+            thumb_data = generate_video_thumbnail(video_cache_path, (200, 200))
+            if thumb_data:
+                _write_bytes_atomic(thumbs_dir / f"{safe_stem}_200x200.jpg", thumb_data.getvalue())
+            preview_data = generate_video_thumbnail(video_cache_path, (800, 800))
+            if preview_data:
+                _write_bytes_atomic(previews_dir / f"{safe_stem}_800x800.jpg", preview_data.getvalue())
+            file_info["processed"] = True
+            file_info["processed_at"] = datetime.now().isoformat()
+            print("    ✓ 网盘转码 HLS 恢复完成")
+            return True, file_info
+        if must_hls:
+            print("    ⛔ 高码率大文件百度转码不可用，标记拉流失败（不拖完整原片）")
+            return "hls_failed", file_info
+        if hls_outcome == "transcoding":
+            print("    ⏳ 百度转码中，稍后可走 HLS 快速通道")
     if is_video and include_video and ext in (".mp4", ".mov"):
         is_remote = str(url).startswith(("http://", "https://"))
         chunk_iter = None
@@ -1481,6 +1665,18 @@ def process_preview_from_existing(filename):
     return True
 
 
+def _mark_job_status(job_id, status):
+    db = get_standalone_db()
+    try:
+        db.execute(
+            "UPDATE media_warm_jobs SET status = ?, updated_at = ? WHERE id = ?",
+            (status, time.time(), job_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
 def _mark_job_streaming(job_id):
     db = get_standalone_db()
     try:
@@ -1607,6 +1803,9 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
             temp_path=temp_path,
             keep_partial_on_abort=keep_partial,
         )
+        if success == "hls_failed":
+            _mark_job_status(job["id"], "hls_failed")
+            return
         if not success:
             if (completion or first_play_only) and _user_job_waiting(
                 exclude_job_id=job["id"], exclude_filename=job["filename"]

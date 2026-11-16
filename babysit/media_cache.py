@@ -302,7 +302,9 @@ def get_media_status(filename, cache_dir=None, db_path=None):
     ready = video_ready if is_video else preview_ready
     state = "ready" if ready else "cold"
     hls_ready = is_video and hls_playlist_path(filename, cache_dir).exists()
-    if not ready and job and job["status"] in ("queued", "processing", "streaming"):
+    if not ready and job and job["status"] == "hls_failed":
+        state = "hls_failed"
+    elif not ready and job and job["status"] in ("queued", "processing", "streaming"):
         state = "processing" if job["status"] == "streaming" else job["status"]
         if (
             is_video
@@ -371,6 +373,9 @@ def enqueue_warm(
         ).fetchall()
         for job in queued:
             if (job["filename"], job["kind"]) not in requested_keys:
+                import traceback
+                print(f"    🔍 取消任务 {job['filename']}({job['kind']}) by client={client_id} requested={requested_keys}")
+                traceback.print_stack()
                 db.execute(
                     "UPDATE media_warm_jobs SET status = 'cancelled', updated_at = ? WHERE id = ?",
                     (now, job["id"]),
