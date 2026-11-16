@@ -90,52 +90,30 @@ function showRecordOptions() {
   })
 }
 
-function watchRecovery(item) {
-  // 恢复完成后端状态翻转，就地更新条目让「点击恢复」角标消失
-  const timer = setInterval(async () => {
+async function pollUntilReady(item, index) {
+  const deadline = Date.now() + 180000
+  while (Date.now() < deadline) {
     try {
       const status = await request(`/media/status/${encodeURIComponent(item.name)}`)
       const done = item.type === 'video' ? status.video_ready : status.preview_ready
       if (done) {
         store.markMediaReady(item.name, status)
-        clearInterval(timer)
-      }
-    } catch (error) { /* 网络抖动时下一轮再试 */ }
-  }, 3000)
-  setTimeout(() => clearInterval(timer), 300000)
-}
-
-function openMedia(index, attempt = 0) {
-  const item = store.media[index]
-  const cold = item && (item.type === 'video' ? item.video_ready === false : item.preview_ready === false)
-  if (cold && attempt === 0) {
-    uni.showToast({
-      title: '需恢复，已同步缓存前后两张',
-      icon: 'none',
-      duration: 2500
-    })
-    watchRecovery(item)
-  }
-  uni.previewMedia({
-    ...nativePreviewOptions(store.media, index),
-    fail: () => {
-      // 微信只能播完整文件，冷恢复期间自动重试，不就绪再提示
-      if (attempt < 20) {
-        if (attempt === 0) {
-          uni.showToast({ title: '恢复中，自动重试…', icon: 'none', duration: 2000 })
-        }
-        setTimeout(() => openMedia(index, attempt + 1), 3000)
+        uni.hideLoading()
+        const freshIndex = store.media.findIndex(entry => entry.name === item.name)
+        openMedia(freshIndex >= 0 ? freshIndex : index, 1)
         return
       }
-      uni.showModal({
-        title: '媒体暂时无法播放',
-        content: '历史媒体可能正在从网盘恢复，原文件仍在网盘。请稍后重试。',
-        confirmText: '重试',
-        cancelText: '返回',
-        success: result => {
-          if (result.confirm) openMedia(index)
-        }
-      })
+    } catch (error) { /* 网络抖动时下一轮再试 */ }
+    await new Promise(resolve => setTimeout(resolve, 2000))
+  }
+  uni.hideLoading()
+  uni.showModal({
+    title: '恢复时间较长',
+    content: '媒体仍在从网盘恢复，请稍后手动重试。',
+    confirmText: '重试',
+    cancelText: '返回',
+    success: result => {
+      if (result.confirm) openMedia(index)
     }
   })
 }

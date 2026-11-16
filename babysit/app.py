@@ -353,7 +353,7 @@ def create_app():
                     # 微信 previewMedia 只能播静态完整文件：快照只有前几帧内容，
                     # 播完定格体验极差。冷文件轮询等完整就绪，不就绪返回 503
                     # 由小程序自动重试
-                    deadline = time.monotonic() + 12
+                    deadline = time.monotonic() + 25
                     while time.monotonic() < deadline:
                         if video_asset_is_ready(filename):
                             ready_file = existing_video_path(filename)
