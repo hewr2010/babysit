@@ -29,7 +29,7 @@ import MilestoneSection from '@/components/MilestoneSection.vue'
 import NativeTabBar from '@/components/NativeTabBar.vue'
 import { useAppStore } from '@/stores/app'
 import { request } from '@/services/api'
-import { hlsUrl, nativePreviewOptions, previewUrl, thumbUrl } from '@/services/media'
+import { hlsUrl, nativePreviewOptions, previewUrl, thumbUrl, videoUrl } from '@/services/media'
 import { requireAuth } from '@/services/auth'
 import { mediaSharePath } from '@/utils/share'
 
@@ -94,9 +94,9 @@ function openMedia(index, attempt = 0) {
   const item = store.media[index]
   const cold = item && (item.type === 'video' ? item.video_ready === false : item.preview_ready === false)
   if (cold && attempt === 0) {
-    // 冷媒体先等恢复完成再进播放器：微信播放器对 503 的失败回调要十几秒，
-    // 直接进只会看到不透明转圈
+    // 冷媒体：先发请求触发后端恢复（只轮询状态不会触发），再轮询等待就绪
     uni.showLoading({ title: '恢复中…', mask: true })
+    fireRecovery(item)
     pollUntilReady(item, index)
     return
   }
@@ -118,6 +118,11 @@ function openMedia(index, attempt = 0) {
       })
     }
   })
+}
+
+function fireRecovery(item) {
+  const url = item.type === 'video' ? videoUrl(item) : previewUrl(item.name)
+  uni.request({ url, timeout: 30000, fail: () => {} })
 }
 
 function openWithHls(index, item) {
