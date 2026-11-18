@@ -1748,13 +1748,6 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
                 _mark_job_streaming(job["id"])
                 _enqueue_completion(job)
         else:
-            if job["kind"] == "video" and not video_asset_is_ready(job["filename"]):
-                output = existing_video_path(job["filename"])
-                print(
-                    f"    🔍 就绪检查失败: output={bool(output and output.exists())} "
-                    f"meta={video_metadata_path(output).exists() if output else '-'} "
-                    f"valid={video_file_is_valid(output) if output and output.exists() else '-'}"
-                )
             finish_warm_job(job["id"])
     except Exception as error:
         _record_download_result(False)
