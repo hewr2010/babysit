@@ -569,11 +569,13 @@ def _locate_moov(tail, base, payload_end):
 class _PrefetchReader:
     """后台线程预读 Range 数据，带缓冲上限与断点续传重试，消费端按迭代器取。"""
 
-    def __init__(self, url, start, end, buffer_limit=128 * 1024 * 1024):
+    def __init__(self, url, start, end, buffer_limit=None):
         self.url = url
         self.start = start
         self.end = end
-        self.buffer_limit = buffer_limit
+        self.buffer_limit = buffer_limit or int(
+            os.environ.get("BABYSIT_PREFETCH_BUFFER_MB", "128")
+        ) * 1024 * 1024
         self.chunks = []
         self.buffered = 0
         self.received = 0
@@ -1757,7 +1759,8 @@ def _run_warm_job_body(job, file_info, first_play_only=False):
 
 
 _TRANSCODE_POOL = concurrent.futures.ThreadPoolExecutor(
-    max_workers=6, thread_name_prefix="transcode"
+    max_workers=int(os.environ.get("BABYSIT_TRANSCODE_WORKERS", "6")),
+    thread_name_prefix="transcode",
 )
 _FILE_LOCKS = {}
 _FILE_LOCKS_GUARD = threading.Lock()
