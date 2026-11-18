@@ -661,31 +661,3 @@ def test_enforce_cache_budget_max_items_keeps_most_recent(media_env, monkeypatch
     assert preview_path("c.jpg").exists() is True
 
 
-def test_faststart_snapshot_remuxes_growing_partial(media_env, tmp_path):
-    import subprocess
-    import babysit.refresh_media as rm
-    from babysit.media_cache import partial_video_path
-
-    db_path, cache_dir = media_env
-    source = tmp_path / "src.mp4"
-    subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=duration=20:size=320x240:rate=30",
-         "-pix_fmt", "yuv420p", "-c:v", "h264_videotoolbox", "-b:v", "2M",
-         "-movflags", "+frag_keyframe+empty_moov+default_base_moof", str(source)],
-        check=True, capture_output=True,
-    )
-    partial = partial_video_path("clip.mov", cache_dir)
-    partial.parent.mkdir(parents=True, exist_ok=True)
-    data = source.read_bytes()
-    partial.write_bytes(data[: len(data) * 3 // 5])
-
-    snapshot = rm._faststart_snapshot(partial, "clip.mov")
-
-    assert snapshot is not None and snapshot.exists()
-    probe = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-         "-of", "json", str(snapshot)],
-        check=True, capture_output=True, text=True,
-    )
-    import json
-    assert float(json.loads(probe.stdout)["format"]["duration"]) > 5

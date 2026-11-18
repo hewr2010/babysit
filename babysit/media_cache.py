@@ -302,7 +302,20 @@ def get_media_status(filename, cache_dir=None, db_path=None):
     ready = video_ready if is_video else preview_ready
     state = "ready" if ready else "cold"
     hls_ready = is_video and hls_playlist_path(filename, cache_dir).exists()
-    if not ready and job and job["status"] == "hls_failed":
+    recent_hls_failed = False
+    if not ready and is_video and not hls_ready:
+        db2 = _connect(db_path)
+        try:
+            recent_hls_failed = bool(
+                db2.execute(
+                    "SELECT 1 FROM media_warm_jobs WHERE filename = ? AND kind = 'video' "
+                    "AND status = 'hls_failed' AND updated_at > ? LIMIT 1",
+                    (filename, time.time() - 600),
+                ).fetchone()
+            )
+        finally:
+            db2.close()
+    if not ready and (recent_hls_failed or (job and job["status"] == "hls_failed")):
         state = "hls_failed"
     elif not ready and job and job["status"] in ("queued", "processing", "streaming"):
         state = "processing" if job["status"] == "streaming" else job["status"]

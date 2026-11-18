@@ -282,16 +282,6 @@ def create_app():
                 return jsonify({"error": "RECOVERY_FAILED", "message": "预览被清理，请重试"}), 503
         return jsonify({"error": "RECOVERY_FAILED", "message": "预览恢复失败"}), 503
 
-    def _wechat_snapshot(partial, filename):
-        """把增长中的分段 MP4 无损重封装成 faststart 快照供微信播放。
-
-        微信播放器既不支持无 Content-Length 的流，也读不了 empty moov；
-        快照按 partial 当前大小缓存，微信的每秒重试不会重复转封装。
-        """
-        from .refresh_media import _faststart_snapshot
-
-        return _faststart_snapshot(partial, filename)
-
     def _stream_growing_video(partial, filename):
         """边转码边吐字节：只按完整 box 边界发送，避免读到写了一半的分片。"""
         from .refresh_media import _iter_boxes

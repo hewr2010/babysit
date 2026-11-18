@@ -380,7 +380,7 @@ def generate_video_thumbnail(video_path, size):
         return None
 
     temp_dir = CACHE_DIR / "temp_video"
-    temp_dir.mkdir(exist_ok=True)
+    temp_dir.mkdir(parents=True, exist_ok=True)
     temp_frame = temp_dir / f"{video_path.name}_frame.jpg"
 
     try:
@@ -804,40 +804,6 @@ def build_remux_stream(url, probe):
     return _make_remux_stream(url, ftyp, moov, tail, tail_base, payload_start, payload_end)
 
 
-def _faststart_snapshot(partial, filename):
-    """把增长中的分段 MP4 重封装为 faststart 快照，按 partial 大小缓存复用。"""
-    safe_name = quote(filename, safe="")
-    try:
-        size = partial.stat().st_size
-    except OSError:
-        return None
-    snapshot_dir = CACHE_DIR / "temp_video"
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-    snapshot = snapshot_dir / f"wx_{safe_name}_{size}.mp4"
-    if snapshot.exists() and snapshot.stat().st_size > 0:
-        return snapshot
-    temp = snapshot_dir / f".wx_{safe_name}_{size}.partial.mp4"
-    temp.unlink(missing_ok=True)
-    try:
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", str(partial), "-c", "copy",
-             "-movflags", "+faststart", str(temp)],
-            capture_output=True,
-            timeout=60,
-        )
-        if result.returncode != 0 or not temp.exists() or temp.stat().st_size < 512 * 1024:
-            # 小于 512KB 说明 partial 还只有 moov 头、没有完整分片
-            temp.unlink(missing_ok=True)
-            return None
-        os.replace(temp, snapshot)
-        for stale in snapshot_dir.glob(f"wx_{safe_name}_*.mp4"):
-            if stale != snapshot:
-                stale.unlink(missing_ok=True)
-        return snapshot
-    except (OSError, subprocess.SubprocessError):
-        temp.unlink(missing_ok=True)
-        return None
-
 
 def _finalize_playable_mp4(temp_output, output_path):
     """把分段 MP4 无损重写为 faststart（moov 带完整采样表置于文件头）。
@@ -891,60 +857,8 @@ def _video_hwaccel_args():
 _CDN_SPEED = {"bytes": 0.0, "seconds": 0.0}
 
 
-def _record_cdn_sample(nbytes, seconds):
-    if seconds > 0 and nbytes > 0:
-        _CDN_SPEED["bytes"] += nbytes
-        _CDN_SPEED["seconds"] += seconds
 
 
-def _cdn_speed_bps():
-    """网盘下载速度估计（字节/秒），默认按限流后的 2MB/s 保守估计。"""
-    if _CDN_SPEED["seconds"] >= 5:
-        return max(_CDN_SPEED["bytes"] / _CDN_SPEED["seconds"], 512 * 1024)
-    return 2 * 1024 * 1024
-
-
-def _mvhd_duration(moov):
-    """从 moov 字节里解析 mvhd 时长（秒），失败返回 None。"""
-    idx = moov.find(b"mvhd")
-    if idx < 0 or idx + 32 > len(moov):
-        return None
-    version = moov[idx + 4]
-    try:
-        if version == 1:
-            timescale = struct.unpack(">I", moov[idx + 24 : idx + 28])[0]
-            duration = struct.unpack(">Q", moov[idx + 28 : idx + 36])[0]
-        else:
-            timescale = struct.unpack(">I", moov[idx + 16 : idx + 20])[0]
-            duration = struct.unpack(">I", moov[idx + 20 : idx + 24])[0]
-        return duration / timescale if timescale else None
-    except struct.error:
-        return None
-
-
-def _probe_source_duration(url, expected_size):
-    """用 remux 探测拿到的 moov 解析源时长（头或尾），失败返回 None。"""
-    probe = probe_remote_mp4(url)
-    if not probe or not probe["total"]:
-        return None
-    if probe["faststart"]:
-        for box, offset, size, header in _iter_boxes(probe["head"], 0, len(probe["head"])):
-            if box == b"moov":
-                return _mvhd_duration(probe["head"][offset : offset + size])
-        return None
-    tail, _ = _fetch_range(url, max(0, probe["total"] - 1024 * 1024), probe["total"] - 1)
-    if not tail:
-        return None
-    pos = tail.rfind(b"moov")
-    while pos >= 4:
-        box_start = pos - 4
-        size = struct.unpack(">I", tail[box_start : pos])[0]
-        if size == 1 and pos + 12 <= len(tail):
-            size = struct.unpack(">Q", tail[pos + 4 : pos + 12])[0]
-        if size >= 8 and box_start + size <= len(tail):
-            return _mvhd_duration(tail[box_start : box_start + size])
-        pos = tail.rfind(b"moov", 0, pos)
-    return None
 
 
 def must_use_online_hls(file_info, url):
@@ -992,7 +906,6 @@ def recover_via_baidu_hls(file_info, output_path, job_id=None):
                 response = requests.get(seg_url, timeout=(5, 10))
                 if response.status_code == 200 and response.content:
                     body = response.content
-                    _record_cdn_sample(len(body), time.monotonic() - seg_t0)
                     break
             except requests.RequestException:
                 time.sleep(1)
@@ -1879,16 +1792,6 @@ def _file_transcode_lock(filename):
     with _FILE_LOCKS_GUARD:
         return _FILE_LOCKS.setdefault(filename, threading.Lock())
 
-
-def _job_playback_ready(job_id):
-    db = get_standalone_db()
-    try:
-        row = db.execute(
-            "SELECT playback_ready FROM media_warm_jobs WHERE id = ?", (job_id,)
-        ).fetchone()
-        return bool(row and row["playback_ready"])
-    finally:
-        db.close()
 
 
 def process_one_warm_job(min_priority=None, max_priority=None):
