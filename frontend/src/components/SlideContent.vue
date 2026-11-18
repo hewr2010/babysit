@@ -21,7 +21,7 @@
     <template v-else-if="photo?.type === 'video' && isSupportedVideo">
       <video
         ref="videoRef"
-        :src="videoUrl"
+        :src="activatedVideoUrl"
         class="slide-media"
         autoplay
         muted
@@ -53,11 +53,16 @@
     <template v-else>
       <div class="empty-content"></div>
     </template>
+
+    <div v-if="showRecoveryHint" class="recovery-overlay">
+      <div class="recovery-spinner"></div>
+      <div class="recovery-text">媒体恢复中，请稍候…</div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
 const props = defineProps({
   photo: {
@@ -91,8 +96,18 @@ const mediaStyle = computed(() => ({
   transition: gesture.value ? 'none' : 'transform 0.2s ease-out'
 }))
 
+const MAX_RETRIES = 10
+const retryCount = ref(0)
+const showRecoveryHint = ref(false)
+let retryTimer = null
+let hintTimer = null
+
 watch(isZoomed, value => emit('zoom-change', value), { immediate: true })
-watch(() => props.photo, resetZoom)
+watch(() => props.photo, () => {
+  resetZoom()
+  resetRecovery()
+  scheduleHint()
+})
 watch(() => props.isCurrent, (isCurrent) => {
   if (!videoRef.value) return
   if (isCurrent) {
@@ -102,6 +117,8 @@ watch(() => props.isCurrent, (isCurrent) => {
     videoRef.value.currentTime = 0
   }
 })
+scheduleHint()
+onBeforeUnmount(clearRecoveryTimers)
 
 const SUPPORTED_VIDEO_FORMATS = ['.mp4', '.webm', '.ogg', '.mov', '.livp']
 const isSupportedVideo = computed(() => {
@@ -113,26 +130,65 @@ const videoFormat = computed(() => {
   if (!props.photo) return ''
   return props.photo.name.substring(props.photo.name.lastIndexOf('.')).toUpperCase()
 })
+const retrySuffix = computed(() => (retryCount.value ? `?r=${retryCount.value}` : ''))
+const activated = ref(false)
+watch(() => props.isCurrent, value => {
+  if (value) activated.value = true
+}, { immediate: true })
+const activatedVideoUrl = computed(() => (activated.value ? videoUrl.value : ''))
 const previewUrl = computed(() => {
   if (!props.photo) return ''
-  return `/preview/${encodeURIComponent(props.photo.name)}`
+  return `/preview/${encodeURIComponent(props.photo.name)}${retrySuffix.value}`
 })
 const videoUrl = computed(() => {
   if (!props.photo || props.photo.type !== 'video') return ''
   const filename = props.photo.name
-  return filename.toLowerCase().endsWith('.livp')
+  const route = filename.toLowerCase().endsWith('.livp')
     ? `/livp/${encodeURIComponent(filename)}`
     : `/video/${encodeURIComponent(filename)}`
+  return `${route}${retrySuffix.value}`
 })
 
+function clearRecoveryTimers() {
+  clearTimeout(retryTimer)
+  clearTimeout(hintTimer)
+}
+
+function resetRecovery() {
+  clearRecoveryTimers()
+  retryCount.value = 0
+  showRecoveryHint.value = false
+}
+
+function scheduleHint() {
+  clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => {
+    showRecoveryHint.value = true
+  }, 3000)
+}
+
+function retryOrFail(message) {
+  if (retryCount.value >= MAX_RETRIES) {
+    clearRecoveryTimers()
+    emit('error', message)
+    return
+  }
+  showRecoveryHint.value = true
+  clearTimeout(retryTimer)
+  retryTimer = setTimeout(() => {
+    retryCount.value += 1
+  }, 3000)
+}
+
 function onLoaded() {
+  resetRecovery()
   emit('loaded')
 }
 function onError() {
-  emit('error', '图片加载失败')
+  retryOrFail('图片加载失败')
 }
 function onVideoError() {
-  emit('error', '视频加载失败')
+  retryOrFail('视频加载失败')
 }
 
 function clampScale(value) {
@@ -240,6 +296,7 @@ function handleTouchEnd(event) {
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  position: relative;
 }
 
 .slide-media {
@@ -303,5 +360,41 @@ function handleTouchEnd(event) {
   background: rgba(0, 0, 0, 0.6);
   border-radius: 8px;
   opacity: 0.95;
+}
+
+.recovery-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(0, 0, 0, 0.35);
+  color: white;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.recovery-spinner {
+  width: 34px;
+  height: 34px;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: recovery-spin 0.9s linear infinite;
+}
+
+.recovery-text {
+  font-size: 15px;
+  padding: 6px 14px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 8px;
+}
+
+@keyframes recovery-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

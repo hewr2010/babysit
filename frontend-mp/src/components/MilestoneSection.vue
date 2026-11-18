@@ -11,7 +11,7 @@
     <scroll-view v-else scroll-x class="milestone-scroll" :show-scrollbar="false">
       <view class="milestone-list">
         <view v-for="item in store.monthlyMilestones" :key="item.id" class="milestone-card" @click="emit('open', item)">
-          <image class="milestone-image" :src="thumbUrl(item.media_filename)" mode="aspectFill" lazy-load />
+          <image class="milestone-image" :src="localImage(thumbUrl(item.media_filename))" mode="aspectFill" lazy-load />
           <view class="milestone-copy">
             <text class="milestone-date">{{ shortDate(item.date) }}</text>
             <text class="milestone-title">{{ item.title }}</text>
@@ -24,12 +24,18 @@
 </template>
 
 <script setup>
+import { watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { thumbUrl } from '@/services/media'
+import { localImage, preloadImages } from '@/services/localImages'
 import { shortDate } from '@/utils/date'
 
 const emit = defineEmits(['open'])
 const store = useAppStore()
+
+watch(() => store.monthlyMilestones, items => {
+  preloadImages(items.map(item => thumbUrl(item.media_filename)))
+}, { immediate: true })
 
 function goManage() {
   uni.navigateTo({ url: '/pages/milestones/manage' })

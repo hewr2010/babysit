@@ -28,7 +28,8 @@ import GrowthSection from '@/components/GrowthSection.vue'
 import MilestoneSection from '@/components/MilestoneSection.vue'
 import NativeTabBar from '@/components/NativeTabBar.vue'
 import { useAppStore } from '@/stores/app'
-import { nativePreviewOptions, previewUrl, thumbUrl } from '@/services/media'
+import { request } from '@/services/api'
+import { hlsUrl, nativePreviewOptions, previewUrl, thumbUrl, videoUrl } from '@/services/media'
 import { requireAuth } from '@/services/auth'
 import { mediaSharePath } from '@/utils/share'
 
@@ -40,7 +41,6 @@ const growthVisible = ref(false)
 const growthType = ref('height')
 const currentTab = ref('growth')
 const sharedMedia = ref(null)
-
 onShareAppMessage(() => {
   if (!sharedMedia.value) return { title: '宝宝成长日志', path: '/pages/index/index' }
   return {
@@ -90,15 +90,96 @@ function showRecordOptions() {
   })
 }
 
-function openMedia(index) {
-  // #ifdef MP-WEIXIN
+function openMedia(index, attempt = 0) {
+  const item = store.media[index]
+  const cold = item && (item.type === 'video' ? item.video_ready === false : item.preview_ready === false)
+  if (cold && attempt === 0) {
+    // 冷媒体：先发请求触发后端恢复（只轮询状态不会触发），再轮询等待就绪
+    uni.showLoading({ title: '恢复中…', mask: true })
+    fireRecovery(item)
+    pollUntilReady(item, index)
+    return
+  }
   uni.previewMedia({
     ...nativePreviewOptions(store.media, index),
-    fail: () => uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
+    fail: () => {
+      if (attempt < 20) {
+        setTimeout(() => openMedia(index, attempt + 1), 3000)
+        return
+      }
+      uni.showModal({
+        title: '媒体暂时无法播放',
+        content: '历史媒体可能正在从网盘恢复，原文件仍在网盘。请稍后重试。',
+        confirmText: '重试',
+        cancelText: '返回',
+        success: result => {
+          if (result.confirm) openMedia(index)
+        }
+      })
+    }
   })
-  return
-  // #endif
-  uni.navigateTo({ url: `/pages/viewer/viewer?index=${index}` })
+}
+
+function fireRecovery(item) {
+  const url = item.type === 'video' ? videoUrl(item) : previewUrl(item.name)
+  uni.request({ url, timeout: 30000, fail: () => {} })
+}
+
+function openWithHls(index, item) {
+  const options = nativePreviewOptions(store.media, index)
+  const position = options.sources.findIndex(source => source.url.includes(encodeURIComponent(item.name)))
+  if (position >= 0) {
+    options.sources[position] = { ...options.sources[position], url: hlsUrl(item) }
+  }
+  uni.previewMedia({
+    ...options,
+    fail: () => setTimeout(() => openMedia(index, 1), 3000)
+  })
+}
+
+async function pollUntilReady(item, index) {
+  const deadline = Date.now() + 180000
+  while (Date.now() < deadline) {
+    try {
+      const status = await request(`/media/status/${encodeURIComponent(item.name)}`)
+      if (status.state === 'hls_failed') {
+        uni.hideLoading()
+        store.markMediaReady(item.name, { preview_ready: true, video_ready: false })
+        uni.showModal({
+          title: '拉流失败',
+          content: '该视频码率过高，在线低清流转码中，请稍后再试。封面图可正常查看。',
+          confirmText: '知道了',
+          showCancel: false
+        })
+        return
+      }
+      if (item.type === 'video' && status.hls_ready && !status.video_ready) {
+        // HLS 分段边转边播：起播只等前几个分段，完整内容随转码增长
+        uni.hideLoading()
+        openWithHls(index, item)
+        return
+      }
+      const done = item.type === 'video' ? status.video_ready : status.preview_ready
+      if (done) {
+        store.markMediaReady(item.name, status)
+        uni.hideLoading()
+        const freshIndex = store.media.findIndex(entry => entry.name === item.name)
+        openMedia(freshIndex >= 0 ? freshIndex : index, 1)
+        return
+      }
+    } catch (error) { /* 网络抖动时下一轮再试 */ }
+    await new Promise(resolve => setTimeout(resolve, 2000))
+  }
+  uni.hideLoading()
+  uni.showModal({
+    title: '恢复时间较长',
+    content: '媒体仍在从网盘恢复，请稍后手动重试。',
+    confirmText: '重试',
+    cancelText: '返回',
+    success: result => {
+      if (result.confirm) openMedia(index)
+    }
+  })
 }
 
 async function openMilestone(item) {
@@ -134,4 +215,5 @@ async function openMilestone(item) {
 .retry-button {
   margin-top: 28rpx;
 }
+
 </style>

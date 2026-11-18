@@ -13,6 +13,10 @@ export function previewUrl(filename) {
   return `${API_HOST}/preview/${encoded(filename)}`
 }
 
+export function hlsUrl(item) {
+  return `${API_HOST}/hls/${encoded(item.name)}/index.m3u8`
+}
+
 export function videoUrl(item) {
   const route = item.name.toLowerCase().endsWith('.livp') ? 'livp' : 'video'
   return `${API_HOST}/${route}/${encoded(item.name)}`

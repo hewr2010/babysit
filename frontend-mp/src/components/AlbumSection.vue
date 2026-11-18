@@ -5,15 +5,16 @@
       <text class="album-count">{{ store.albumLoading ? '加载中…' : `${store.media.length} 项` }}</text>
     </view>
     <view v-if="!store.media.length && !store.albumLoading" class="empty-state">这个月还没有照片或视频</view>
-    <view v-for="group in groups" :key="group.date" class="album-day">
+    <view v-for="(group, groupIndex) in groups" :key="group.date" class="album-day">
       <view class="day-heading">
         <text>{{ shortDate(group.date) }}</text>
         <text class="day-count">{{ group.items.length }} 项</text>
       </view>
       <view class="media-grid">
         <view v-for="item in visibleItems(group)" :key="item.name" class="media-cell" @click="open(item)" @longpress.stop="showActions(item)">
-          <image class="media-thumb" :src="thumbUrl(item.name)" mode="aspectFill" lazy-load />
+          <image class="media-thumb" :src="localImage(thumbUrl(item.name))" mode="aspectFill" :lazy-load="groupIndex > 0" />
           <view v-if="item.type === 'video'" class="video-badge">▶</view>
+          <view v-if="needsRecovery(item)" class="recovery-badge">点击恢复</view>
           <view v-if="milestoneNames.has(item.name)" class="milestone-badge">⭐</view>
           <button class="media-menu-button" @click.stop="showActions(item)">···</button>
           <text v-if="item.time" class="media-time">{{ item.time }}</text>
@@ -41,6 +42,7 @@ import { computed, ref, watch } from 'vue'
 import AppSheet from '@/components/AppSheet.vue'
 import MilestoneEditor from '@/components/MilestoneEditor.vue'
 import { saveToAlbum, thumbUrl } from '@/services/media'
+import { localImage, preloadImages } from '@/services/localImages'
 import { useAppStore } from '@/stores/app'
 import { shortDate } from '@/utils/date'
 
@@ -56,6 +58,9 @@ const groups = computed(() => Object.keys(store.albumByDate).sort().reverse().ma
   date,
   items: [...store.albumByDate[date]].sort((a, b) => (b.time || '').localeCompare(a.time || ''))
 })))
+watch(groups, value => {
+  preloadImages(value.flatMap(group => group.items.map(item => thumbUrl(item.name))))
+}, { immediate: true })
 const milestoneNames = computed(() => new Set(store.milestones.map(item => item.media_filename)))
 const selectedMilestones = computed(() => selectedMedia.value
   ? store.milestones.filter(item => item.media_filename === selectedMedia.value.name)
@@ -75,6 +80,12 @@ function toggleDate(date) {
   if (next.has(date)) next.delete(date)
   else next.add(date)
   expandedDates.value = next
+}
+
+function needsRecovery(item) {
+  return item.type === 'video'
+    ? item.video_ready === false
+    : item.preview_ready === false
 }
 
 function open(item) {
@@ -148,6 +159,7 @@ async function saveCurrent() {
   position: relative;
   overflow: hidden;
   width: 100%;
+  height: 220rpx;
   aspect-ratio: 1;
   border-radius: 16rpx;
   background: #fdf2f8;
@@ -209,19 +221,31 @@ async function saveCurrent() {
   line-height: 1.2;
 }
 
+.recovery-badge {
+  position: absolute;
+  top: 8rpx;
+  right: 8rpx;
+  padding: 4rpx 10rpx;
+  border-radius: 16rpx;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffd666;
+  font-size: 18rpx;
+  line-height: 1.4;
+}
+
 .media-menu-button {
   position: absolute;
   z-index: 1;
   top: 8rpx;
   right: 8rpx;
-  width: 52rpx;
-  height: 52rpx;
+  width: 88rpx;
+  height: 88rpx;
   padding: 0;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.55);
   color: #ffffff;
   text-align: center;
-  line-height: 46rpx;
+  line-height: 80rpx;
   font-size: 28rpx;
 }
 

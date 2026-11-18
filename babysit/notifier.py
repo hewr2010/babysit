@@ -61,17 +61,14 @@ class BarkNotifier:
         return url
 
     def notify_round(self, results, pending_review):
-        activity_keys = ("copied", "existing", "review", "rejected", "error")
-        if not any(results.get(key, 0) for key in activity_keys):
+        copied = results.get("copied", 0)
+        review = results.get("review", 0)
+        processed = copied + review + results.get("rejected", 0)
+        if not processed:
             return False
         body = (
-            f"本轮新复制 {results.get('copied', 0)} 个，"
-            f"目标已有 {results.get('existing', 0)} 个；\n"
-            f"待确认新增 {results.get('review', 0)} 个，"
-            f"已归档 {results.get('review_copied', 0)} 个，"
-            f"当前待人工处理 {pending_review} 个；\n"
-            f"不匹配 {results.get('rejected', 0)} 个，"
-            f"失败 {results.get('error', 0)} 个。"
+            f"新处理 {processed} 个，正例 {copied} 个，"
+            f"需人工到「爸妈与小宝-review」确认 {review} 个。"
         )
         success = True
         for url in self.urls:

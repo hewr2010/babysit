@@ -241,6 +241,26 @@ def test_delete_media_file(test_db):
     db.close()
 
 
+def test_generate_image_thumbnail_applies_exif_orientation():
+    import io
+    from PIL import Image
+    from babysit.refresh_media import generate_image_thumbnail
+
+    source = Image.new('RGB', (120, 80), color='red')
+    exif = Image.Exif()
+    exif[274] = 6
+    original = io.BytesIO()
+    source.save(original, format='JPEG', exif=exif)
+    original.seek(0)
+
+    with Image.open(original) as img:
+        output = generate_image_thumbnail(img, (800, 800))
+
+    with Image.open(output) as result:
+        assert result.size == (80, 120)
+        assert result.getexif().get(274) in (None, 1)
+
+
 def test_process_video_uses_streaming(tmp_path, monkeypatch):
     """验证大视频在 refresh_media 中通过流式下载落盘，而不是全部读进内存"""
     import shutil
@@ -266,7 +286,7 @@ def test_process_video_uses_streaming(tmp_path, monkeypatch):
     monkeypatch.setattr(rm, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.setattr(rm, "get_download_url", lambda fn: ("http://dummy", None))
 
-    def fake_download(url, dest_path, timeout=120):
+    def fake_download(url, dest_path, timeout=120, job_id=None):
         shutil.copy(str(fake_video), str(dest_path))
         return True, None
 
@@ -363,3 +383,230 @@ def test_repair_media_database_resets_partial_records(test_db, tmp_path, monkeyp
     assert not thumb.exists()
     # 视频缓存完整，应保留
     assert (videos / safe).exists()
+
+
+def _fake_stream_response(payload):
+    class Response:
+        status_code = 200
+        headers = {}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            for i in range(0, len(payload), 65536):
+                yield payload[i : i + 65536]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    return Response()
+
+
+def test_remote_transcode_uses_single_stream(monkeypatch, tmp_path):
+    import subprocess
+    import babysit.refresh_media as rm
+
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=10",
+         "-pix_fmt", "yuv420p", "-y", str(source)],
+        check=True,
+        capture_output=True,
+    )
+    payload = source.read_bytes()
+    calls = []
+
+    def get(url, **kwargs):
+        calls.append(kwargs.get("stream"))
+        return _fake_stream_response(payload)
+
+    monkeypatch.setattr(rm.requests, "get", get)
+    output = tmp_path / "out.mp4"
+
+    assert rm.transcode_video("http://test/video.mp4", output) is True
+    assert output.exists()
+    assert calls == [True]
+
+
+def test_remote_transcode_rejects_truncated_stream(monkeypatch, tmp_path):
+    import subprocess
+    import babysit.refresh_media as rm
+
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=10",
+         "-pix_fmt", "yuv420p", "-y", str(source)],
+        check=True,
+        capture_output=True,
+    )
+    payload = source.read_bytes()[: source.stat().st_size // 3]
+    monkeypatch.setattr(
+        rm.requests, "get", lambda *args, **kwargs: _fake_stream_response(payload)
+    )
+    output = tmp_path / "out.mp4"
+
+    assert rm.transcode_video("http://test/video.mp4", output) is False
+    assert not output.exists()
+
+
+def _box(box_type, size=8):
+    import struct
+    return struct.pack(">I4s", size, box_type) + b"\x00" * (size - 8)
+
+
+def test_remote_is_faststart_detects_box_order(monkeypatch):
+    import babysit.refresh_media as rm
+
+    faststart = _box(b"ftyp", 20) + _box(b"moov", 1024) + _box(b"mdat", 4096)
+    trailing = _box(b"ftyp", 20) + _box(b"wide") + _box(b"mdat", 4096)
+
+    class Response:
+        status_code = 206
+
+        def __init__(self, payload):
+            self.payload = payload
+
+        def iter_content(self, chunk_size):
+            yield self.payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(
+        rm.requests, "get", lambda *args, **kwargs: Response(faststart)
+    )
+    assert rm.remote_is_faststart("http://test/a.mp4") is True
+
+    monkeypatch.setattr(
+        rm.requests, "get", lambda *args, **kwargs: Response(trailing)
+    )
+    assert rm.remote_is_faststart("http://test/b.mov") is False
+
+    def boom(*args, **kwargs):
+        raise rm.requests.RequestException("network down")
+
+    monkeypatch.setattr(rm.requests, "get", boom)
+    assert rm.remote_is_faststart("http://test/c.mov") is False
+
+
+def _range_server(payload):
+    total = len(payload)
+
+    class Response:
+        def __init__(self, start, end):
+            self.status_code = 206
+            self.headers = {"Content-Range": f"bytes {start}-{end}/{total}"}
+            self._data = payload[start : end + 1]
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            for i in range(0, len(self._data), chunk_size):
+                yield self._data[i : i + chunk_size]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def get(url, headers=None, stream=False, timeout=None):
+        spec = (headers or {}).get("Range", "bytes=0-").removeprefix("bytes=")
+        start_s, _, end_s = spec.partition("-")
+        start = int(start_s)
+        end = min(int(end_s) if end_s else total - 1, total - 1)
+        return Response(start, end)
+
+    return get
+
+
+def test_remux_stream_rebuilds_trailing_moov_file(monkeypatch, tmp_path):
+    import json
+    import subprocess
+    import babysit.refresh_media as rm
+
+    source = tmp_path / "trailing.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=3:size=320x240:rate=12",
+         "-pix_fmt", "yuv420p", "-y", str(source)],
+        check=True,
+        capture_output=True,
+    )
+    payload = source.read_bytes()
+    boxes = [b for b, *_ in rm._iter_boxes(payload, 0, len(payload))]
+    assert boxes.index(b"moov") > boxes.index(b"mdat"), "ffmpeg 默认产物应是 moov 在尾"
+
+    monkeypatch.setattr(rm.requests, "get", _range_server(payload))
+    probe = rm.probe_remote_mp4("http://test/trailing.mp4")
+    assert probe and probe["faststart"] is False and probe["total"] == len(payload)
+
+    stream = rm.build_remux_stream("http://test/trailing.mp4", probe)
+    assert stream is not None
+    rebuilt = tmp_path / "rebuilt.mp4"
+    rebuilt.write_bytes(b"".join(stream()))
+
+    probe_out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "json", str(rebuilt)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    duration = float(json.loads(probe_out.stdout)["format"]["duration"])
+    assert abs(duration - 3.0) < 0.3
+    subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(rebuilt), "-frames:v", "1",
+         "-f", "null", "-"],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_remux_stream_falls_back_when_probe_incomplete(monkeypatch, tmp_path):
+    import babysit.refresh_media as rm
+
+    monkeypatch.setattr(
+        rm.requests, "get",
+        lambda *args, **kwargs: (_ for _ in ()).throw(rm.requests.RequestException("down")),
+    )
+    assert rm.probe_remote_mp4("http://test/x.mp4") is None
+    assert rm.build_remux_stream("http://test/x.mp4", {"head": b"", "total": None}) is None
+
+
+def test_remux_stream_accepts_trailing_boxes_after_moov(monkeypatch, tmp_path):
+    import json
+    import subprocess
+    import babysit.refresh_media as rm
+
+    source = tmp_path / "trailing.mp4"
+    subprocess.run(
+        ["ffmpeg", "-f", "lavfi", "-i", "testsrc=duration=2:size=320x240:rate=12",
+         "-pix_fmt", "yuv420p", "-y", str(source)],
+        check=True,
+        capture_output=True,
+    )
+    payload = source.read_bytes() + rm.struct.pack(">I4s", 16, b"free") + b"\x00" * 8
+
+    monkeypatch.setattr(rm.requests, "get", _range_server(payload))
+    probe = rm.probe_remote_mp4("http://test/t.mp4")
+    assert probe and probe["faststart"] is False
+    stream = rm.build_remux_stream("http://test/t.mp4", probe)
+    assert stream is not None
+    rebuilt = tmp_path / "rebuilt.mp4"
+    rebuilt.write_bytes(b"".join(stream()))
+    probe_out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "json", str(rebuilt)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert abs(float(json.loads(probe_out.stdout)["format"]["duration"]) - 2.0) < 0.3

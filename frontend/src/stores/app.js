@@ -70,6 +70,17 @@ export const useAppStore = defineStore('app', () => {
 
   const photosByDate = ref({})
 
+  function markMediaReady(name) {
+    for (const date of Object.keys(photosByDate.value)) {
+      const item = photosByDate.value[date].find(entry => entry.name === name)
+      if (item) {
+        item.preview_ready = true
+        item.video_ready = true
+        return
+      }
+    }
+  }
+
   async function fetchPhotos() {
     loading.value = true
     try {
@@ -194,6 +205,7 @@ export const useAppStore = defineStore('app', () => {
     currentMonth,
     photos,
     photosByDate,
+    markMediaReady,
     growthRecords,
     milestones,
     loading,

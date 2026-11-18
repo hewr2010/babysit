@@ -75,6 +75,60 @@ class BaiduImageClientTests(unittest.TestCase):
         self.assertEqual(params["dir"], "/apps/bypy/爸妈与小宝")
         self.assertEqual(params["limit"], 1000)
 
+    def test_iter_pages_merges_native_videos_by_upload_time(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    {
+                        "errno": 0,
+                        "list": [
+                            {"fs_id": 10, "server_filename": "new.mov", "server_mtime": 150},
+                            {"fs_id": 11, "server_filename": "old.mp4", "server_mtime": 50},
+                            {"fs_id": 12, "server_filename": "ignore.jpg", "server_mtime": 500},
+                            {"fs_id": 13, "server_filename": "older.mov", "server_mtime": 10},
+                        ],
+                    }
+                ),
+                FakeResponse(
+                    {
+                        "errno": 0,
+                        "info": [
+                            {"fs_id": 1, "server_filename": "a.jpg", "server_mtime": 200},
+                            {"fs_id": 2, "server_filename": "b.jpg", "server_mtime": 100},
+                        ],
+                    }
+                ),
+                FakeResponse(
+                    {
+                        "errno": 0,
+                        "info": [
+                            {"fs_id": 3, "server_filename": "c.jpg", "server_mtime": 75},
+                        ],
+                    }
+                ),
+            ]
+        )
+        client = BaiduImageClient("/来自：手机", page_size=2, session=session)
+        with patch.dict("os.environ", {"BABYSIT_BAIDU_ACCESS_TOKEN": "token"}):
+            pages = list(client.iter_pages())
+
+        self.assertEqual(
+            [[item["fs_id"] for item in page] for page in pages],
+            [[1, 10, 2], [3], [11, 13]],
+        )
+
+    def test_iter_pages_filters_historical_native_videos(self):
+        client = BaiduImageClient("/来自：手机")
+        client.list_files = lambda path: [
+            {"fs_id": 10, "server_filename": "new.mov", "server_mtime": 150},
+            {"fs_id": 11, "server_filename": "old.mov", "server_mtime": 50},
+        ]
+        client.list_page = lambda page: []
+
+        pages = list(client.iter_pages(native_after=100))
+
+        self.assertEqual([[item["fs_id"] for item in page] for page in pages], [[10]])
+
     def test_thumbnail_download_prefers_largest_url(self):
         session = FakeSession([FakeResponse(content=b"image")])
         client = BaiduImageClient("/来自：手机", session=session)

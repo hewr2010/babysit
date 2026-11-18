@@ -12,7 +12,7 @@
     <view v-else-if="!media.length" class="empty-state">还没有可标记的照片或视频</view>
     <view v-else class="manage-grid">
       <view v-for="item in media" :key="item.name" class="manage-cell" :class="{ marked: hasMilestone(item.name) }" @click="openEditor(item)">
-        <image class="manage-image" :src="thumbUrl(item.name)" mode="aspectFill" lazy-load />
+        <image class="manage-image" :src="localImage(thumbUrl(item.name))" mode="aspectFill" lazy-load />
         <text v-if="hasMilestone(item.name)" class="marked-label">已标记</text>
       </view>
     </view>
@@ -27,6 +27,7 @@ import MilestoneEditor from '@/components/MilestoneEditor.vue'
 import { request } from '@/services/api'
 import { requireAuth } from '@/services/auth'
 import { thumbUrl } from '@/services/media'
+import { localImage, preloadImages } from '@/services/localImages'
 import { useAppStore } from '@/stores/app'
 import { albumMonths, flattenAlbum } from '@/utils/album'
 
@@ -61,6 +62,7 @@ async function selectMonth(item) {
   loading.value = true
   try {
     media.value = flattenAlbum(await request(`/album/${item.year}/${item.month}`))
+    preloadImages(media.value.map(entry => thumbUrl(entry.name)))
   } catch (error) {
     uni.showToast({ title: error.message, icon: 'none' })
   } finally {

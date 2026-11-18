@@ -1,6 +1,6 @@
 <template>
   <AppSheet :visible="visible" title="标记重要时刻" @close="emit('close')">
-    <image v-if="media" class="milestone-preview" :src="previewUrl(media.name)" mode="aspectFit" />
+    <image v-if="media" class="milestone-preview" :src="localImage(previewUrl(media.name))" mode="aspectFit" />
     <view v-if="existing.length" class="existing-milestones">
       <text class="field-label">这个媒体的已有时刻</text>
       <view v-for="item in existing" :key="item.id" class="existing-row">
@@ -27,6 +27,7 @@
 import { computed, ref, watch } from 'vue'
 import AppSheet from '@/components/AppSheet.vue'
 import { previewUrl } from '@/services/media'
+import { localImage, preloadImages } from '@/services/localImages'
 import { useAppStore } from '@/stores/app'
 
 const props = defineProps({
@@ -39,6 +40,10 @@ const title = ref('')
 const description = ref('')
 const saving = ref(false)
 const existing = computed(() => props.media ? store.milestones.filter(item => item.media_filename === props.media.name) : [])
+
+watch(() => props.media, media => {
+  if (media) preloadImages([previewUrl(media.name)])
+}, { immediate: true })
 
 watch(() => props.visible, visible => {
   if (visible) {

@@ -2,6 +2,7 @@
 import sqlite3
 from flask import g
 from .config import DB_PATH
+from .media_cache import existing_video_path, preview_path
 
 
 def _configure_connection(db):
@@ -245,15 +246,20 @@ def _rows_to_grouped_dict(rows):
         date = row['date']
         if date not in result:
             result[date] = []
+        filename = row['filename']
+        preview = preview_path(filename)
+        video = existing_video_path(filename)
         result[date].append({
-            'name': row['filename'],
+            'name': filename,
             'type': row['file_type'],
             'size': row['file_size'],
             'md5': row['md5'],
             'date': row['date'],
             'time': row['time'] or '',
             'baidu_date': row['baidu_date'],
-            'processed_at': row['processed_at']
+            'processed_at': row['processed_at'],
+            'preview_ready': preview.is_file() and preview.stat().st_size > 0,
+            'video_ready': video is not None if row['file_type'] == 'video' else None
         })
     return result
 

@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote, unquote
 import requests
-from PIL import Image
+from PIL import Image, ImageOps
 from PIL.ExifTags import TAGS
 from pillow_heif import register_heif_opener
 from .config import CACHE_DIR, BAIDU_REMOTE_PATH, PCS_API_BASE
@@ -255,6 +255,39 @@ def update_files_with_exif(date_groups):
     return sorted_groups
 
 
+def get_baidu_hls(filename, qualities=("M3U8_AUTO_1080", "M3U8_AUTO_480")):
+    """百度网盘平台侧转码的 HLS（官方播放器同源）。
+
+    返回 (status, playlist_text, segment_urls)：
+    status 为 "ok" / "transcoding"（百度按需转码中，稍后可用）/ "unavailable"。
+    """
+    token = get_access_token()
+    if not token:
+        return "unavailable", None, None
+    remote = quote(f"/apps/bypy{BAIDU_REMOTE_PATH}/{filename}", safe="")
+    saw_transcoding = False
+    for quality in qualities:
+        url = (
+            "https://d.pcs.baidu.com/rest/2.0/pcs/file?method=streaming"
+            f"&path={remote}&type={quality}&access_token={token}"
+        )
+        try:
+            response = requests.get(url, timeout=(3, 4))
+        except requests.RequestException:
+            continue
+        if response.status_code == 200 and "#EXTM3U" in response.text:
+            segments = [
+                line.strip()
+                for line in response.text.splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+            if segments:
+                return "ok", response.text, segments
+        if "transcoding" in response.text:
+            saw_transcoding = True
+    return ("transcoding" if saw_transcoding else "unavailable"), None, None
+
+
 def get_download_url(filename):
     """获取百度网盘下载直链"""
     token = get_access_token()
@@ -479,6 +512,7 @@ def get_thumbnail_data(filename, size=(200, 200)):
                     save_exif_cache(exif_cache)
 
         # 统一处理图片
+        img = ImageOps.exif_transpose(img)
         if img.mode in ("RGBA", "P"):
             img = img.convert("RGB")
         img.thumbnail(size, Image.Resampling.LANCZOS)

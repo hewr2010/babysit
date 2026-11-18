@@ -24,6 +24,7 @@
                class="photo-item" :class="{ video: photo.type === 'video' }"
                @click="openPhoto(date, photo)">
             <img :src="`/thumb/${encodeURIComponent(photo.name)}`" loading="lazy" />
+            <span v-if="needsRecovery(photo)" class="recovery-badge">点击恢复</span>
             <span v-if="photo.time" class="photo-time">{{ photo.time }}</span>
           </div>
         </div>
@@ -32,11 +33,14 @@
         </button>
       </div>
     </div>
+    <transition name="toast-fade">
+      <div v-if="toastMessage" class="recovery-toast">{{ toastMessage }}</div>
+    </transition>
   </section>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '../stores/app'
 import { useModalStore } from '../stores/modal'
 
@@ -64,7 +68,27 @@ function formatDate(dateStr) {
   return `${month}月${day}日`
 }
 
+function needsRecovery(photo) {
+  return photo.type === 'video'
+    ? photo.video_ready === false
+    : photo.preview_ready === false
+}
+
+const toastMessage = ref('')
+let toastTimer = null
+
+function showToast(message) {
+  toastMessage.value = message
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastMessage.value = ''
+  }, 3000)
+}
+
 function openPhoto(date, photo) {
+  if (needsRecovery(photo)) {
+    showToast('该媒体需从网盘恢复，已同步开始缓存前后两张')
+  }
   // 找到该照片在所有照片中的索引
   const index = store.photos.findIndex(p => p.name === photo.name)
   if (index !== -1) {
@@ -229,6 +253,43 @@ function viewMorePhotos(date, photos) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.recovery-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #ffd666;
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  pointer-events: none;
+}
+
+.recovery-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 90px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  font-size: 13px;
+  padding: 8px 16px;
+  border-radius: 16px;
+  z-index: 1000;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
 }
 
 .empty-state {
