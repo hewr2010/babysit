@@ -90,6 +90,36 @@ function showRecordOptions() {
   })
 }
 
+function openMedia(index, attempt = 0) {
+  const item = store.media[index]
+  const cold = item && (item.type === 'video' ? item.video_ready === false : item.preview_ready === false)
+  if (cold && attempt === 0) {
+    // 冷媒体先等恢复完成再进播放器：微信播放器对 503 的失败回调要十几秒，
+    // 直接进只会看到不透明转圈
+    uni.showLoading({ title: '恢复中…', mask: true })
+    pollUntilReady(item, index)
+    return
+  }
+  uni.previewMedia({
+    ...nativePreviewOptions(store.media, index),
+    fail: () => {
+      if (attempt < 20) {
+        setTimeout(() => openMedia(index, attempt + 1), 3000)
+        return
+      }
+      uni.showModal({
+        title: '媒体暂时无法播放',
+        content: '历史媒体可能正在从网盘恢复，原文件仍在网盘。请稍后重试。',
+        confirmText: '重试',
+        cancelText: '返回',
+        success: result => {
+          if (result.confirm) openMedia(index)
+        }
+      })
+    }
+  })
+}
+
 function openWithHls(index, item) {
   const options = nativePreviewOptions(store.media, index)
   const position = options.sources.findIndex(source => source.url.includes(encodeURIComponent(item.name)))
