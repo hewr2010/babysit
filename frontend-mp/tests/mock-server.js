@@ -53,17 +53,39 @@ async function startMockServer(videoPath) {
   state.recovery = {}
   state.delays = {}
   state.progress = {}
+  state.hlsReady = {}
+  state.thumbFailures = {}
+  state.albumDelays = {}
   const mediaStatus = item => ({
     filename: item.name,
     type: item.type,
     state: state.recovery[item.name] || ((item.type === 'video' ? item.video_ready : item.preview_ready) ? 'ready' : 'cold'),
     preview_ready: item.preview_ready,
     video_ready: item.video_ready,
+    hls_ready: state.hlsReady[item.name] === true,
     job: {
       progress: state.progress[item.name] || null,
       stage: state.recovery[item.name] === 'streaming' ? '可边下边播' : (item.type === 'video' ? '转码' : '下载')
     }
   })
+  const triggerRecovery = item => {
+    if (['processing', 'streaming', 'ready'].includes(state.recovery[item.name])) return
+    state.recovery[item.name] = 'processing'
+    state.progress[item.name] = 5
+    if (item.type === 'video') {
+      setTimeout(() => {
+        state.recovery[item.name] = 'streaming'
+        state.progress[item.name] = 20
+      }, 500)
+      setTimeout(() => { state.progress[item.name] = 65 }, 1000)
+    }
+    setTimeout(() => {
+      item.preview_ready = true
+      if (item.type === 'video') item.video_ready = true
+      state.recovery[item.name] = 'ready'
+      state.progress[item.name] = 100
+    }, state.delays[item.name] || 1200)
+  }
   let nextGrowthId = 10
   let nextMilestoneId = 10
 
@@ -123,7 +145,15 @@ async function startMockServer(videoPath) {
       return json(Object.assign({}, ...Object.values(albums)))
     }
     const albumMatch = pathname.match(/^\/api\/album\/(\d+)\/(\d+)$/)
-    if (albumMatch) return json(albums[`${Number(albumMatch[1])}-${Number(albumMatch[2])}`] || {})
+    if (albumMatch) {
+      const key = `${Number(albumMatch[1])}-${Number(albumMatch[2])}`
+      const groups = albums[key] || {}
+      if (state.albumDelays[key]) {
+        setTimeout(() => json(groups), state.albumDelays[key])
+        return
+      }
+      return json(groups)
+    }
     if (pathname === '/api/test/media' && request.method === 'POST') {
       readJson(request, data => {
         const item = allMedia().find(media => media.name === data.name)
@@ -145,23 +175,7 @@ async function startMockServer(videoPath) {
       readJson(request, data => {
         const item = allMedia().find(media => media.name === data.filename)
         if (!item) return response.writeHead(404).end(JSON.stringify({ error: 'not found' }))
-        if (data.include_current) {
-          state.recovery[item.name] = 'processing'
-          state.progress[item.name] = 5
-          if (item.type === 'video') {
-            setTimeout(() => {
-              state.recovery[item.name] = 'streaming'
-              state.progress[item.name] = 20
-            }, 500)
-            setTimeout(() => { state.progress[item.name] = 65 }, 1000)
-          }
-          setTimeout(() => {
-            item.preview_ready = true
-            if (item.type === 'video') item.video_ready = true
-            state.recovery[item.name] = 'ready'
-            state.progress[item.name] = 100
-          }, state.delays[item.name] || 1200)
-        }
+        if (data.include_current) triggerRecovery(item)
         response.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ current: mediaStatus(item) }))
       })
       return
@@ -169,7 +183,12 @@ async function startMockServer(videoPath) {
     if (pathname.startsWith('/thumb/') || pathname.startsWith('/preview/') || pathname.startsWith('/api/download/')) {
       const name = pathname.slice(pathname.lastIndexOf('/') + 1)
       const item = allMedia().find(media => media.name === name)
+      if (pathname.startsWith('/thumb/') && state.thumbFailures[name] > 0) {
+        state.thumbFailures[name] -= 1
+        return response.writeHead(500).end(JSON.stringify({ error: 'simulated thumbnail failure' }))
+      }
       if (pathname.startsWith('/preview/') && item && !item.preview_ready) {
+        triggerRecovery(item)
         return response.writeHead(404).end(JSON.stringify({ error: 'CACHE_COLD' }))
       }
       response.writeHead(200, { 'Content-Type': 'image/png' }).end(png)
@@ -179,6 +198,7 @@ async function startMockServer(videoPath) {
       const name = pathname.slice(pathname.lastIndexOf('/') + 1)
       const item = allMedia().find(media => media.name === name)
       if (item && !item.video_ready && state.recovery[item.name] !== 'streaming') {
+        triggerRecovery(item)
         return response.writeHead(404).end(JSON.stringify({ error: 'CACHE_COLD' }))
       }
       const fs = require('node:fs')

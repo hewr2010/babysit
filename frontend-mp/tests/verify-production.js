@@ -51,30 +51,31 @@ async function main() {
     await sleep(800)
     await screenshot(miniProgram, '03-album-tab')
 
-    const mediaTypes = await miniProgram.evaluate(() => {
+    const mediaItems = await miniProgram.evaluate(() => {
       const groups = getApp()?.$vm?.$pinia?.state?.value?.app?.albumByDate || {}
       return Object.keys(groups).sort().reverse().flatMap(date => {
-        return [...groups[date]].sort((a, b) => (b.time || '').localeCompare(a.time || '')).map(item => item.type)
+        return [...groups[date]].sort((a, b) => (b.time || '').localeCompare(a.time || '')).map(item => ({ ...item, date }))
       })
     })
-    const photoIndex = mediaTypes.findIndex(type => type !== 'video')
-    const videoIndex = mediaTypes.findIndex(type => type === 'video')
-    assert.ok(photoIndex >= 0, 'Real album should contain a photo')
-    console.log(`Loaded ${mediaTypes.length} real media items`)
+    const photo = mediaItems.find(item => item.type !== 'video')
+    const video = mediaItems.find(item => item.type === 'video')
+    assert.ok(photo, 'Real album should contain a photo')
+    console.log(`Loaded ${mediaItems.length} real media items`)
 
-    await miniProgram.evaluate(index => wx.navigateTo({ url: `/pages/viewer/viewer?index=${index}` }), photoIndex)
-    await waitFor()
-    await screenshot(miniProgram, '04-photo')
-    await miniProgram.evaluate(() => wx.navigateBack())
-    await sleep(800)
-
-    if (videoIndex >= 0) {
-      await miniProgram.evaluate(index => wx.navigateTo({ url: `/pages/viewer/viewer?index=${index}` }), videoIndex)
+    async function openShared(item, screenshotName) {
+      const [year, month] = item.date.split('-')
+      const path = `/pages/viewer/viewer?media=${encodeURIComponent(item.name)}&year=${year}&month=${Number(month)}`
+      await miniProgram.evaluate(path => wx.navigateTo({ url: path }), path)
       await waitFor()
-      await screenshot(miniProgram, '05-video')
+      assert.equal((await miniProgram.currentPage()).path, 'pages/viewer/viewer')
+      assert.equal(await (await miniProgram.currentPage()).$('.load-error'), null)
+      await screenshot(miniProgram, screenshotName)
       await miniProgram.evaluate(() => wx.navigateBack())
       await sleep(800)
     }
+
+    await openShared(photo, '04-photo')
+    if (video) await openShared(video, '05-video')
 
     await miniProgram.evaluate(() => wx.navigateTo({ url: '/pages/milestones/manage' }))
     await waitFor()

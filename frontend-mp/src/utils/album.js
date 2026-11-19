@@ -19,7 +19,9 @@ export function albumMonths(groups) {
 }
 
 export function latestByMetric(records, type) {
-  return records.find(record => record.metric_type === type) || null
+  return records
+    .filter(record => record.metric_type === type)
+    .sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.id || 0) - (a.id || 0))[0] || null
 }
 
 export function previewWindow(media, index, limit = 50) {

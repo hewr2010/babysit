@@ -11,7 +11,8 @@
     <scroll-view v-else scroll-x class="milestone-scroll" :show-scrollbar="false">
       <view class="milestone-list">
         <view v-for="item in store.monthlyMilestones" :key="item.id" class="milestone-card" @click="emit('open', item)">
-          <image class="milestone-image" :src="localImage(thumbUrl(item.media_filename))" mode="aspectFill" lazy-load />
+          <image v-if="!imageFailed(thumbUrl(item.media_filename))" class="milestone-image" :src="localImage(thumbUrl(item.media_filename))" mode="aspectFill" lazy-load />
+          <view v-else class="thumb-error" @click.stop="retryImage(thumbUrl(item.media_filename))">缩略图加载失败，点击重试</view>
           <view class="milestone-copy">
             <text class="milestone-date">{{ shortDate(item.date) }}</text>
             <text class="milestone-title">{{ item.title }}</text>
@@ -27,7 +28,7 @@
 import { watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { thumbUrl } from '@/services/media'
-import { localImage, preloadImages } from '@/services/localImages'
+import { imageFailed, localImage, preloadImages, retryImage } from '@/services/localImages'
 import { shortDate } from '@/utils/date'
 
 const emit = defineEmits(['open'])
@@ -63,6 +64,19 @@ function goManage() {
 .milestone-image {
   width: 248rpx;
   height: 220rpx;
+}
+
+.thumb-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 248rpx;
+  height: 220rpx;
+  padding: 20rpx;
+  color: #9f1239;
+  text-align: center;
+  font-size: 20rpx;
 }
 
 .milestone-copy {

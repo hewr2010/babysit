@@ -52,7 +52,8 @@ export async function saveToAlbum(item) {
     throw new Error('文件超过 50MB，无法保存到相册')
   }
   const isVideo = item.type === 'video'
-  const url = isVideo ? videoUrl(item) : `${API_HOST}/api/download/${encoded(item.name)}`
+  const isLivePhoto = item.name.toLowerCase().endsWith('.livp')
+  const url = isLivePhoto ? videoUrl(item) : `${API_HOST}/api/download/${encoded(item.name)}`
   const filePath = await download(url)
   await new Promise((resolve, reject) => {
     const options = {

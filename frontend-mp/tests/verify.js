@@ -37,7 +37,10 @@ async function elementText(page, selector) {
 async function screenshot(miniProgram, name) {
   const file = path.join(outputDir, `${name}.png`)
   try {
-    await miniProgram.screenshot({ path: file })
+    await Promise.race([
+      miniProgram.screenshot({ path: file }),
+      sleep(5000).then(() => { throw new Error(`Screenshot timed out: ${name}`) })
+    ])
     return
   } catch (error) {
     if (process.env.ALLOW_SCREENSHOT_FAILURE === '1') {
@@ -95,6 +98,7 @@ async function main() {
     await (await page.$('.album-tab')).tap()
     await sleep(400)
     await (await page.$('.growth-tab')).tap()
+    await sleep(400)
     await miniProgram.evaluate(() => {
       wx.showActionSheet = options => {
         wx.__recordMenuItems = options.itemList
@@ -107,6 +111,7 @@ async function main() {
     await (await page.$('.sheet-close')).tap()
 
     await (await page.$('.baby-card')).tap()
+    await waitFor(async () => !!(await page.$('.baby-name-input')), 'baby editor')
     await (await page.$('.baby-name-input')).input('新名字')
     await (await page.$('.save-baby')).tap()
     await waitFor(async () => mock.state.baby.name === '新名字', 'baby saved')
@@ -114,6 +119,7 @@ async function main() {
 
     const growthCount = mock.state.growth.length
     await (await page.$('.add-growth')).tap()
+    await waitFor(async () => !!(await page.$('.growth-value-input')), 'growth editor')
     await (await page.$('.growth-value-input')).input('53.2')
     await (await page.$('.save-growth')).tap()
     await waitFor(async () => mock.state.growth.length === growthCount + 1, 'growth saved')
@@ -160,11 +166,16 @@ async function main() {
     await waitFor(async () => mock.state.milestones.length === 0, 'milestone deleted')
     await (await page.$('.sheet-close')).tap()
 
+    await miniProgram.evaluate(() => { wx.__nativePreviewOptions = null })
     await miniProgram.navigateTo('/pages/viewer/viewer?index=1')
-    await waitFor(async () => !!(await (await miniProgram.currentPage()).$('.viewer-video')), 'video viewer')
-    await sleep(1200)
+    await waitFor(async () => {
+      const options = await miniProgram.evaluate(() => wx.__nativePreviewOptions)
+      return options?.current === 1
+    }, 'native video viewer')
+    const videoPreview = await miniProgram.evaluate(() => wx.__nativePreviewOptions)
+    assert.equal(videoPreview.sources[1].type, 'video')
+    assert.ok(videoPreview.sources[1].url.includes('/video/'))
     await screenshot(miniProgram, '05-video-viewer')
-    assert.ok(mock.state.requests.some(item => item.startsWith('GET /video/')), 'video should be requested')
 
     if (consoleErrors.length) throw new Error(`Mini program console errors:\n${consoleErrors.join('\n')}`)
     console.log('WeChat DevTools verification passed.')

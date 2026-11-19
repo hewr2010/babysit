@@ -2,8 +2,8 @@
   "name": "宝宝成长日志",
   "appid": "wx120d79d166124d26",
   "description": "记录宝宝成长的每一步",
-  "versionName": "1.2.1",
-  "versionCode": "203",
+  "versionName": "1.5.1",
+  "versionCode": "204",
   "transformPx": false,
   "mp-weixin": {
     "appid": "wx120d79d166124d26",

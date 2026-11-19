@@ -1,6 +1,7 @@
 <template>
   <AppSheet :visible="visible" title="标记重要时刻" @close="emit('close')">
-    <image v-if="media" class="milestone-preview" :src="localImage(previewUrl(media.name))" mode="aspectFit" />
+    <image v-if="media && !imageFailed(previewUrl(media.name))" class="milestone-preview" :src="localImage(previewUrl(media.name))" mode="aspectFit" />
+    <view v-else-if="media" class="milestone-preview thumb-error" @click="retryImage(previewUrl(media.name))">预览图加载失败，点击重试</view>
     <view v-if="existing.length" class="existing-milestones">
       <text class="field-label">这个媒体的已有时刻</text>
       <view v-for="item in existing" :key="item.id" class="existing-row">
@@ -27,7 +28,7 @@
 import { computed, ref, watch } from 'vue'
 import AppSheet from '@/components/AppSheet.vue'
 import { previewUrl } from '@/services/media'
-import { localImage, preloadImages } from '@/services/localImages'
+import { imageFailed, localImage, preloadImages, retryImage } from '@/services/localImages'
 import { useAppStore } from '@/stores/app'
 
 const props = defineProps({
@@ -95,6 +96,17 @@ function remove(item) {
   margin-bottom: 28rpx;
   border-radius: 16rpx;
   background: #f2f5f4;
+}
+
+.thumb-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 24rpx;
+  color: #9f1239;
+  text-align: center;
+  font-size: 24rpx;
 }
 
 .existing-milestones {

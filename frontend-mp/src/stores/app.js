@@ -53,12 +53,20 @@ export const useAppStore = defineStore('app', () => {
     await loadMilestones()
   }
 
-  async function loadAlbum() {
+  async function loadAlbum(target = null) {
     const requestId = ++albumRequestId
+    const targetYear = target?.year ?? year.value
+    const targetMonth = target?.month ?? month.value
     albumLoading.value = true
     try {
-      const groups = await request(`/album/${year.value}/${month.value}`)
-      if (requestId === albumRequestId) albumByDate.value = groups
+      const groups = await request(`/album/${targetYear}/${targetMonth}`)
+      if (requestId === albumRequestId) {
+        albumByDate.value = groups
+        if (target) {
+          year.value = targetYear
+          month.value = targetMonth
+        }
+      }
     } finally {
       if (requestId === albumRequestId) albumLoading.value = false
     }
@@ -66,17 +74,15 @@ export const useAppStore = defineStore('app', () => {
 
   async function changeMonth(delta) {
     const next = shiftMonth(year.value, month.value, delta)
-    year.value = next.year
-    month.value = next.month
-    await loadAlbum()
+    await loadAlbum(next)
   }
 
   function markMediaReady(name, status = {}) {
     for (const date of Object.keys(albumByDate.value)) {
       const item = albumByDate.value[date].find(entry => entry.name === name)
       if (item) {
-        item.preview_ready = status.preview_ready !== false
-        item.video_ready = status.video_ready !== false
+        if ('preview_ready' in status) item.preview_ready = status.preview_ready
+        if ('video_ready' in status) item.video_ready = status.video_ready
         return
       }
     }
@@ -86,9 +92,7 @@ export const useAppStore = defineStore('app', () => {
     if (!item.date) return -1
     const [itemYear, itemMonth] = item.date.split('-').map(Number)
     if (itemYear !== year.value || itemMonth !== month.value) {
-      year.value = itemYear
-      month.value = itemMonth
-      await loadAlbum()
+      await loadAlbum({ year: itemYear, month: itemMonth })
     }
     return media.value.findIndex(mediaItem => mediaItem.name === item.media_filename)
   }

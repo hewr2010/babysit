@@ -13,12 +13,32 @@ export function verifyName(name) {
   return verified
 }
 
+export function normalizeRedirect(value = '') {
+  let target = value
+  if (/^%2f/i.test(target)) {
+    try {
+      target = decodeURIComponent(target)
+    } catch (error) {
+      return ''
+    }
+  }
+  const path = target.split('?')[0]
+  const allowed = ['/pages/viewer/viewer', '/pages/index/index', '/pages/milestones/manage']
+  return allowed.includes(path) ? target : ''
+}
+
 export function redirectToLogin() {
   const pages = getCurrentPages()
   const current = pages[pages.length - 1]
   if (!current || current.route === 'pages/auth/auth') return
   const query = Object.entries(current.options || {})
-    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`)
+    .map(([key, value]) => {
+      let decoded = value
+      try {
+        decoded = decodeURIComponent(value)
+      } catch (error) {}
+      return `${key}=${encodeURIComponent(decoded)}`
+    })
     .join('&')
   const target = `/${current.route}${query ? `?${query}` : ''}`
   uni.reLaunch({ url: `/pages/auth/auth?redirect=${encodeURIComponent(target)}` })

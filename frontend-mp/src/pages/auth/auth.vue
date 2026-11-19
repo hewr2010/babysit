@@ -14,17 +14,14 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { isVerified, verifyName } from '@/services/auth'
+import { isVerified, normalizeRedirect, verifyName } from '@/services/auth'
 
 const name = ref('')
 const error = ref('')
 const redirect = ref('')
 
 onLoad(options => {
-  const allowedPrefixes = ['/pages/viewer/viewer', '/pages/index/index', '/pages/milestones/manage']
-  if (allowedPrefixes.some(prefix => options.redirect?.startsWith(prefix))) {
-    redirect.value = options.redirect
-  }
+  redirect.value = normalizeRedirect(options.redirect)
 })
 
 onMounted(() => {

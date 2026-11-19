@@ -2,9 +2,12 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 
-async function importSource(relativePath, replacement = null) {
+async function importSource(relativePath, replacements = null) {
   let source = fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8')
-  if (replacement) source = source.replace(replacement.from, replacement.to)
+  const list = replacements ? (Array.isArray(replacements) ? replacements : [replacements]) : []
+  for (const replacement of list) {
+    source = source.replace(replacement.from, replacement.to)
+  }
   return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
 }
 
@@ -63,7 +66,11 @@ async function run() {
   })
   global.getCurrentPages = () => [{ route: 'pages/index/index', options: {} }]
   let loginRedirects = 0
-  uni.reLaunch = () => { loginRedirects += 1 }
+  let loginUrl = ''
+  uni.reLaunch = options => {
+    loginRedirects += 1
+    loginUrl = typeof options === 'string' ? options : options.url
+  }
   uni.values.baby_auth_verified = 'true'
   assert.equal(auth.requireAuth(), true)
   assert.equal(loginRedirects, 0)
@@ -73,7 +80,87 @@ async function run() {
   assert.equal(auth.verifyName('何与青'), true)
   assert.equal(uni.values.baby_auth_verified, 'true')
   assert.equal(auth.isVerified(), true)
-  console.log('Unit tests passed: dates, album helpers, media share paths, weight conversion and persistent auth.')
+  const sharedRedirect = '/pages/viewer/viewer?media=%E7%85%A7%E7%89%87.jpg&year=2026&month=11'
+  assert.equal(auth.normalizeRedirect(sharedRedirect), sharedRedirect)
+  assert.equal(auth.normalizeRedirect(encodeURIComponent(sharedRedirect)), sharedRedirect)
+  assert.equal(auth.normalizeRedirect(encodeURIComponent('https://example.com')), '')
+  assert.equal(auth.normalizeRedirect('/pages/viewer/viewer.evil'), '')
+  global.getCurrentPages = () => [{
+    route: 'pages/viewer/viewer',
+    options: { media: '%E7%85%A7%E7%89%87.jpg', year: '2026', month: '11' }
+  }]
+  auth.redirectToLogin()
+  assert.equal(new URLSearchParams(loginUrl.split('?')[1]).get('redirect'), sharedRedirect)
+  assert.equal(album.latestByMetric([
+    { id: 1, date: '2024-01-01', metric_type: 'height', value: 50 },
+    { id: 2, date: '2024-03-01', metric_type: 'height', value: 52 }
+  ], 'height').value, 52)
+
+  const nativeCalls = []
+  const recoveryCalls = []
+  uni.previewMedia = options => {
+    nativeCalls.push(options)
+    options.success?.()
+  }
+  uni.request = options => recoveryCalls.push(options.url)
+  global.__mediaStatus = async () => ({})
+  const mediaPreview = await importSource('../src/services/mediaPreview.js', [
+    {
+      from: "import { request } from '@/services/api'",
+      to: 'const request = path => globalThis.__mediaStatus(path)'
+    },
+    {
+      from: "import { hlsUrl, nativePreviewOptions, previewUrl, videoUrl } from '@/services/media'",
+      to: `const hlsUrl = item => 'hls:' + item.name
+const previewUrl = name => 'preview:' + name
+const videoUrl = item => 'video:' + item.name
+const nativePreviewOptions = (media, index) => ({
+  current: index,
+  sources: media.map(item => ({ url: item.type === 'video' ? videoUrl(item) : previewUrl(item.name), type: item.type === 'video' ? 'video' : 'image' }))
+})`
+    }
+  ])
+  const media = [
+    { name: 'cold.jpg', type: 'photo', preview_ready: false },
+    { name: 'hot.jpg', type: 'photo', preview_ready: true }
+  ]
+  const controller = mediaPreview.createMediaPreview({ getMedia: () => media, onState: () => {} })
+  let finishColdStatus
+  global.__mediaStatus = () => new Promise(resolve => { finishColdStatus = resolve })
+  const coldOpen = controller.open(0)
+  await new Promise(resolve => setTimeout(resolve, 20))
+  await controller.open(1)
+  finishColdStatus({ preview_ready: true })
+  await coldOpen
+  assert.deepEqual(nativeCalls.map(options => options.current), [1], '取消的冷恢复不得再打开旧媒体')
+
+  let navigationAttempts = 0
+  nativeCalls.length = 0
+  uni.previewMedia = options => {
+    navigationAttempts += 1
+    nativeCalls.push(options)
+    if (navigationAttempts === 1) options.fail?.({ errMsg: 'previewMedia:fail called too early, cannot find navigation' })
+    else options.success?.()
+  }
+  await controller.open(1)
+  await new Promise(resolve => setTimeout(resolve, 400))
+  assert.equal(navigationAttempts, 2)
+
+  media[0].preview_ready = false
+  global.__mediaStatus = async () => ({ preview_ready: true, state: 'ready' })
+  await controller.open(0)
+  assert.equal(media[0].preview_ready, true)
+  assert.ok(recoveryCalls.some(url => url === 'preview:cold.jpg'))
+
+  nativeCalls.length = 0
+  const videos = [{ name: 'movie.mp4', type: 'video', video_ready: false }]
+  const hlsController = mediaPreview.createMediaPreview({ getMedia: () => videos, onState: () => {} })
+  global.__mediaStatus = async () => ({ hls_ready: true, video_ready: false, state: 'streaming' })
+  await hlsController.open(0)
+  assert.equal(nativeCalls[0].sources[0].url, 'hls:movie.mp4')
+  hlsController.cancel()
+  controller.cancel()
+  console.log('Unit tests passed: dates, album helpers, media preview recovery/cancellation, share paths, growth conversion and auth.')
 }
 
 run().catch(error => {

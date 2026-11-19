@@ -12,7 +12,8 @@
       </view>
       <view class="media-grid">
         <view v-for="item in visibleItems(group)" :key="item.name" class="media-cell" @click="open(item)" @longpress.stop="showActions(item)">
-          <image class="media-thumb" :src="localImage(thumbUrl(item.name))" mode="aspectFill" :lazy-load="groupIndex > 0" />
+          <image v-if="!imageFailed(thumbUrl(item.name))" class="media-thumb" :src="localImage(thumbUrl(item.name))" mode="aspectFill" :lazy-load="groupIndex > 0" />
+          <view v-else class="thumb-error" @click.stop="retryImage(thumbUrl(item.name))">缩略图加载失败，点击重试</view>
           <view v-if="item.type === 'video'" class="video-badge">▶</view>
           <view v-if="needsRecovery(item)" class="recovery-badge">点击恢复</view>
           <view v-if="milestoneNames.has(item.name)" class="milestone-badge">⭐</view>
@@ -42,7 +43,7 @@ import { computed, ref, watch } from 'vue'
 import AppSheet from '@/components/AppSheet.vue'
 import MilestoneEditor from '@/components/MilestoneEditor.vue'
 import { saveToAlbum, thumbUrl } from '@/services/media'
-import { localImage, preloadImages } from '@/services/localImages'
+import { imageFailed, localImage, preloadImages, retryImage } from '@/services/localImages'
 import { useAppStore } from '@/stores/app'
 import { shortDate } from '@/utils/date'
 
@@ -69,6 +70,8 @@ const selectedMilestones = computed(() => selectedMedia.value
 watch(() => store.selectedMonthKey, () => {
   expandedDates.value = new Set()
   actionVisible.value = false
+  editorVisible.value = false
+  selectedMedia.value = null
 })
 
 function visibleItems(group) {
@@ -103,7 +106,6 @@ function showActions(item) {
 }
 
 function closeActions() {
-  suppressClick = false
   actionVisible.value = false
 }
 
@@ -223,14 +225,28 @@ async function saveCurrent() {
 
 .recovery-badge {
   position: absolute;
-  top: 8rpx;
   right: 8rpx;
+  bottom: 36rpx;
   padding: 4rpx 10rpx;
   border-radius: 16rpx;
   background: rgba(0, 0, 0, 0.65);
   color: #ffd666;
   font-size: 18rpx;
   line-height: 1.4;
+}
+
+.thumb-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 16rpx;
+  background: #fdf2f8;
+  color: #9f1239;
+  text-align: center;
+  font-size: 20rpx;
 }
 
 .media-menu-button {
